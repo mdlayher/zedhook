@@ -42,9 +42,6 @@ func NewServer(handler http.Handler, ll *log.Logger) *Server {
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 5 * time.Second,
 			ErrorLog:     ll,
-			// TODO(mdlayher): consider filing an issue for the standard library
-			// to figure out how to get read-only access to a net.Conn; or maybe
-			// just its file descriptor?
 			ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 				// Best effort; connection may be UNIX or TCP.
 				if creds, err := peercred.Get(c); err == nil {
@@ -158,14 +155,14 @@ func (h *handler) push(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		// Fetch data stored in the request context. For UNIX sockets, creds
-		// will be non-nil as well.
-		ctx   = r.Context()
-		local = ctx.Value(http.LocalAddrContextKey).(net.Addr)
-		creds = ctx.Value(keyCreds).(*peercred.Creds)
+		// Fetch data stored in the request context. For UNIX sockets, ok will
+		// be true and creds will be accessible.
+		ctx       = r.Context()
+		local     = ctx.Value(http.LocalAddrContextKey).(net.Addr)
+		creds, ok = ctx.Value(keyCreds).(*peercred.Creds)
 	)
 
-	if creds != nil {
+	if ok {
 		h.ll.Printf("local: %s, peer: %s, creds: %+v", local, r.RemoteAddr, creds)
 	} else {
 		h.ll.Printf("local: %s, peer: %s", local, r.RemoteAddr)
