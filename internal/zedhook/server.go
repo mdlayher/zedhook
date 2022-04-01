@@ -46,7 +46,11 @@ func NewServer(handler http.Handler, ll *log.Logger) *Server {
 			// to figure out how to get read-only access to a net.Conn; or maybe
 			// just its file descriptor?
 			ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-				ctx = context.WithValue(ctx, keyNetConn, c)
+				// Best effort; connection may be UNIX or TCP.
+				if creds, err := peercred.Get(c); err == nil {
+					ctx = context.WithValue(ctx, keyCreds, creds)
+				}
+
 				return ctx
 			},
 		},
@@ -57,8 +61,8 @@ func NewServer(handler http.Handler, ll *log.Logger) *Server {
 // A contextKey is an opaque structure used as a key for context.Context values.
 type contextKey struct{ name string }
 
-// keyNetConn stores a net.Conn in a context.Context Value.
-var keyNetConn = &contextKey{"netconn"}
+// keyCreds stores *peercred.Creds in a context.Context Value.
+var keyCreds = &contextKey{"peercred"}
 
 // Serve serves the zedhookd receiver and blocks until the context is canceled.
 func (s *Server) Serve(ctx context.Context) error {
@@ -153,22 +157,13 @@ func (h *handler) push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// DANGER YOLO: we _must_ treat any use of the net.Conn from request context
-	// as read-only, and cannot invoke methods like Read, Write, Close, etc.
-	// because the net/http.Server ultimately owns this net.Conn. We just want
-	// to get access to the underlying local address and file descriptor for
-	// SO_PEERCRED.
 	var (
+		// Fetch data stored in the request context. For UNIX sockets, creds
+		// will be non-nil as well.
 		ctx   = r.Context()
 		local = ctx.Value(http.LocalAddrContextKey).(net.Addr)
+		creds = ctx.Value(keyCreds).(*peercred.Creds)
 	)
-
-	creds, err := peercred.Get(ctx.Value(keyNetConn).(net.Conn))
-	if err != nil && !errors.Is(err, peercred.ErrUnsupportedConnType) {
-		h.ll.Printf("%s: failed to get peer credentials: %v", r.RemoteAddr, err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
 
 	if creds != nil {
 		h.ll.Printf("local: %s, peer: %s, creds: %+v", local, r.RemoteAddr, creds)
