@@ -129,11 +129,10 @@ func makePayload(ctx context.Context, envs []string, status execFunc) (Payload, 
 	)
 
 	for _, env := range envs {
-		kv := strings.Split(env, "=")
-		if len(kv) != 2 {
+		k, v, ok := strings.Cut(env, "=")
+		if !ok {
 			continue
 		}
-		k, v := kv[0], kv[1]
 
 		switch k {
 		case "ZPOOL":

@@ -19,54 +19,24 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"log"
-	"net/http"
 	"os"
+	"os/signal"
 
 	"github.com/mdlayher/zedhook/internal/zedhook"
 )
 
 func main() {
-	// TODO(mdlayher): factor logic into internal/zedhook.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/push", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			log.Printf("%s: method not allowed: %q", r.RemoteAddr, r.Method)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
-		if ct := r.Header.Get("Content-Type"); ct != "application/json; charset=utf-8" {
-			log.Printf("%s: bad request content type: %q", r.RemoteAddr, ct)
-			http.Error(w, "bad request content type", http.StatusBadRequest)
-			return
-		}
+	var (
+		ll  = log.New(os.Stderr, "", log.LstdFlags)
+		srv = zedhook.NewServer(zedhook.NewHandler(ll), ll)
+	)
 
-		var p zedhook.Payload
-		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			log.Printf("%s: bad request payload: %v", r.RemoteAddr, err)
-			http.Error(w, "bad request payload", http.StatusBadRequest)
-			return
-		}
-
-		// zedhook ZEDLET expects HTTP 204 and empty body.
-		w.WriteHeader(http.StatusNoContent)
-
-		// TODO(mdlayher): dump to stdout for now; but later store for future
-		// use.
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "\t")
-		_ = enc.Encode(p)
-	})
-
-	// TODO(mdlayher): UNIX socket listener.
-	srv := &http.Server{
-		Addr:    ":9919",
-		Handler: mux,
-	}
-
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+	if err := srv.Serve(ctx); err != nil {
+		ll.Fatalf("failed to serve zedhookd: %v", err)
 	}
 }

@@ -27,7 +27,7 @@ import (
 
 // The default addresses zedhookd will bind to, given no configuration.
 const (
-	defaultUNIX = "http+unix:///run/zedhookd.sock:/push"
+	defaultUNIX = "http+unix:///run/zedhookd/zedhookd.sock:/push"
 	defaultHTTP = "http://localhost:9919/push"
 )
 
@@ -40,7 +40,7 @@ type Client struct {
 // NewClient creates a Client for the zedhookd server specified by addr.
 //
 // If addr is empty, the default zedhookd addresses will be tried in order:
-//   - http+unix:///run/zedhookd.sock:/push
+//   - http+unix:///run/zedhookd/zedhookd.sock:/push
 //   - http://localhost:9919/push
 //
 // If a non-empty addr is set, that address will be used and no fallback paths

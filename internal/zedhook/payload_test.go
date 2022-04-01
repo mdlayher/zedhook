@@ -50,6 +50,8 @@ func Test_makePayload(t *testing.T) {
 				"xxx",
 				"IFS=\n",
 				"ZPOOL=/sbin/zpool",
+				// Extra = sign.
+				"ZEVENT_TEST=foo=bar",
 				"ZEVENT_CLASS=sysevent.fs.zfs.history_event",
 				"ZEVENT_POOL=tank",
 			},
@@ -58,6 +60,7 @@ func Test_makePayload(t *testing.T) {
 				Variables: []Variable{
 					{Key: "ZEVENT_CLASS", Value: "sysevent.fs.zfs.history_event"},
 					{Key: "ZEVENT_POOL", Value: "tank"},
+					{Key: "ZEVENT_TEST", Value: "foo=bar"},
 				},
 			},
 		},
