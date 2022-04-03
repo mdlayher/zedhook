@@ -9,13 +9,12 @@ require (
 )
 
 require (
-	github.com/davecgh/go-spew v1.1.1
 	github.com/mdlayher/netx v0.0.0-20200512211805-669a06fde734
-	golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	inet.af/peercred v0.0.0-20210906144145-0893ea02156a
 )
 
-require golang.org/x/sys v0.0.0-20211019181941-9d821ace8654 // indirect
+require golang.org/x/sys v0.0.0-20220403020550-483a9cbc67c0 // indirect
 
 // Pending PR: https://github.com/peterbourgon/unixtransport/pull/3
-replace github.com/peterbourgon/unixtransport v0.0.1 => github.com/mdlayher/unixtransport v0.0.2-0.20220330164218-1bd0a65e57cf
+replace github.com/peterbourgon/unixtransport v0.0.1 => github.com/mdlayher/unixtransport v0.0.2-0.20220403125358-b2388bd7d2a2

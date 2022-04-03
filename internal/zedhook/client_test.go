@@ -126,7 +126,7 @@ func testUNIX(t *testing.T) (*Client, <-chan Payload) {
 	t.Helper()
 
 	handler, pC := testHandler()
-	srv := unixtransport.NewTestServer(handler)
+	srv := unixtransport.NewTestServer(t, handler)
 	t.Cleanup(srv.Close)
 
 	c, err := NewClient(srv.URL+"/push", srv.Client())
