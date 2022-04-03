@@ -124,7 +124,7 @@ func (s *Server) Serve(ctx context.Context) error {
 
 var _ http.Handler = (*Handler)(nil)
 
-// A handler is an http.Handler for zedhookd logic.
+// A Handler is an http.Handler for zedhookd logic.
 type Handler struct {
 	// OnPayload is an optional hook which is fired when a valid zedhook payload
 	// push request is sent to a Server. If not nil, the callback will be fired

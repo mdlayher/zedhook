@@ -153,10 +153,6 @@ func testHandler() (http.Handler, <-chan zedhook.Payload) {
 	return h, pC
 }
 
-func panicf(format string, a ...any) {
-	panic(fmt.Sprintf(format, a...))
-}
-
 // Hypothetical unixtransport.Install API, see:
 // https://github.com/peterbourgon/unixtransport/pull/3
 
