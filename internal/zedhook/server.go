@@ -42,17 +42,23 @@ func NewServer(handler http.Handler, ll *log.Logger) *Server {
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 5 * time.Second,
 			ErrorLog:     ll,
-			ConnContext: func(ctx context.Context, c net.Conn) context.Context {
-				// Best effort; connection may be UNIX or TCP.
-				if creds, err := peercred.Get(c); err == nil {
-					ctx = context.WithValue(ctx, keyCreds, creds)
-				}
-
-				return ctx
-			},
+			ConnContext:  peercredConnContext,
 		},
 		ll: ll,
 	}
+}
+
+// peercredConnContext is a http.Server ConnContext hook which attaches UNIX
+// socket peer credentials to a request's context.
+//
+// TODO(mdlayher): follow up on https://github.com/inetaf/peercred/issues/9.
+func peercredConnContext(ctx context.Context, c net.Conn) context.Context {
+	// Best effort; connection may be UNIX or TCP.
+	if creds, err := peercred.Get(c); err == nil {
+		ctx = context.WithValue(ctx, keyCreds, creds)
+	}
+
+	return ctx
 }
 
 // A contextKey is an opaque structure used as a key for context.Context values.
@@ -116,24 +122,38 @@ func (s *Server) Serve(ctx context.Context) error {
 	return nil
 }
 
+var _ http.Handler = (*Handler)(nil)
+
 // A handler is an http.Handler for zedhookd logic.
-type handler struct {
-	ll *log.Logger
+type Handler struct {
+	// OnPayload is an optional hook which is fired when a valid zedhook payload
+	// push request is sent to a Server. If not nil, the callback will be fired
+	// with the contents of the Payload.
+	OnPayload func(p Payload)
+
+	mux http.Handler
+	ll  *log.Logger
 }
 
 // NewHandler constructs an http.Handler for use with the Server.
-func NewHandler(ll *log.Logger) http.Handler {
-	h := &handler{ll: ll}
+func NewHandler(ll *log.Logger) *Handler {
+	h := &Handler{ll: ll}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/push", h.push)
 	// TODO(mdlayher): Prometheus metrics.
 
-	return mux
+	h.mux = mux
+	return h
+}
+
+// ServeHTTP implements http.Handler.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mux.ServeHTTP(w, r)
 }
 
 // push implements the HTTP POST push logic for the all-zedhook ZEDLET.
-func (h *handler) push(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
 	// TODO(mdlayher): consider factoring out middleware for request validation.
 	if r.Method != http.MethodPost {
 		h.ll.Printf("%s: method not allowed: %q", r.RemoteAddr, r.Method)
@@ -169,6 +189,11 @@ func (h *handler) push(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.ll.Printf("client: %s, payload: %d variables", r.RemoteAddr, len(p.Variables))
+
+	if h.OnPayload != nil {
+		// Fire payload hook.
+		h.OnPayload(p)
+	}
 
 	w.Header().Set("Connection", "close")
 	w.Header().Set("Server", "zedhook")

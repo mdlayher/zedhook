@@ -15,8 +15,9 @@ package zedhook
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,21 +142,12 @@ func testUNIX(t *testing.T) (*Client, <-chan Payload) {
 // contents of the first request once decoded.
 func testHandler() (http.Handler, <-chan Payload) {
 	pC := make(chan Payload, 1)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// We only support POST /push with JSON.
-		ct := r.Header.Get("Content-Type")
-		if r.Method != http.MethodPost || r.URL.Path != "/push" || ct != contentJSON {
-			panicf("bad HTTP request: %s %s, Content-Type: %q", r.Method, r.URL, ct)
-		}
 
-		var p Payload
-		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			panicf("failed to decode JSON: %v", err)
-		}
+	// Discard all logs, pass payload to pC.
+	h := NewHandler(log.New(io.Discard, "", 0))
+	h.OnPayload = func(p Payload) { pC <- p }
 
-		pC <- p
-		w.WriteHeader(http.StatusNoContent)
-	}), pC
+	return h, pC
 }
 
 func panicf(format string, a ...any) {
