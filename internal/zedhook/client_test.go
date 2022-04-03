@@ -18,9 +18,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -128,8 +130,8 @@ func testUNIX(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
 	t.Helper()
 
 	handler, pC := testHandler()
-	srv := unixtransport.NewTestServer(t, handler)
-	t.Cleanup(srv.Close)
+	srv := httptest.NewUnstartedServer(handler)
+	unixtransportInstall(t, srv)
 
 	c, err := zedhook.NewClient(srv.URL+"/push", srv.Client())
 	if err != nil {
@@ -153,4 +155,46 @@ func testHandler() (http.Handler, <-chan zedhook.Payload) {
 
 func panicf(format string, a ...any) {
 	panic(fmt.Sprintf(format, a...))
+}
+
+// Hypothetical unixtransport.Install API, see:
+// https://github.com/peterbourgon/unixtransport/pull/3
+
+// unixtransportInstall takes an unstarted *httptest.Server and configures the
+// server and associated client for HTTP over UNIX socket transport.
+//
+// If the server is already started, unixtransportInstall will panic.
+func unixtransportInstall(tb testing.TB, s *httptest.Server) {
+	tb.Helper()
+
+	ln, err := net.Listen("unix", filepath.Join(tb.TempDir(), "unixtransport.sock"))
+	if err != nil {
+		tb.Errorf("unixtransport: httptest.Server not configured: %v", err)
+		return
+	}
+
+	tb.Cleanup(func() {
+		if err := ln.Close(); err != nil {
+			tb.Errorf("unixtransport: close listener: %v", err)
+		}
+	})
+
+	// Plumb in the listener and start the server using that listener. This sets
+	// srv.URL, which we must later override.
+	s.Listener = ln
+	s.Start()
+
+	unixtransport.Register(s.Client().Transport.(*http.Transport))
+
+	// srv.URL is already set but it hard-codes the http scheme. Manually
+	// construct a valid URL suitable for use by unixtransport-enabled HTTP(S)
+	// clients.
+	var scheme string
+	if s.TLS != nil {
+		scheme = "https+unix"
+	} else {
+		scheme = "http+unix"
+	}
+
+	s.URL = fmt.Sprintf("%s://%s:", scheme, ln.Addr())
 }

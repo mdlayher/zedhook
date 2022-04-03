@@ -15,6 +15,3 @@ require (
 )
 
 require golang.org/x/sys v0.0.0-20220403020550-483a9cbc67c0 // indirect
-
-// Pending PR: https://github.com/peterbourgon/unixtransport/pull/3
-replace github.com/peterbourgon/unixtransport v0.0.1 => github.com/mdlayher/unixtransport v0.0.2-0.20220403125358-b2388bd7d2a2
