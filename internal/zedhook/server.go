@@ -149,11 +149,16 @@ func NewHandler(ll *log.Logger) *Handler {
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Server", "zedhook")
 	h.mux.ServeHTTP(w, r)
 }
 
 // push implements the HTTP POST push logic for the all-zedhook ZEDLET.
 func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
+	// We expect client push to use one-shot requests from the ZEDLET and
+	// therefore there's no advantage to keepalives.
+	w.Header().Set("Connection", "close")
+
 	// TODO(mdlayher): consider factoring out middleware for request validation.
 	if r.Method != http.MethodPost {
 		h.ll.Printf("%s: method not allowed: %q", r.RemoteAddr, r.Method)
@@ -195,7 +200,5 @@ func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
 		h.OnPayload(p)
 	}
 
-	w.Header().Set("Connection", "close")
-	w.Header().Set("Server", "zedhook")
 	w.WriteHeader(http.StatusNoContent)
 }

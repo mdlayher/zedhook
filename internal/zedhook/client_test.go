@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package zedhook
+package zedhook_test
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/mdlayher/zedhook/internal/zedhook"
 	"github.com/peterbourgon/unixtransport"
 	"golang.org/x/exp/slices"
 )
@@ -33,7 +34,7 @@ import (
 func TestClientPush(t *testing.T) {
 	tests := []struct {
 		name string
-		fn   func(t *testing.T) (*Client, <-chan Payload)
+		fn   func(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload)
 	}{
 		{
 			name: "HTTP",
@@ -58,13 +59,13 @@ func TestClientPush(t *testing.T) {
 
 			// Fixed version number.
 			p := <-pC
-			if diff := cmp.Diff(V0, p.Version()); diff != "" {
+			if diff := cmp.Diff(zedhook.V0, p.Version()); diff != "" {
 				t.Fatalf("unexpected payload version (-want +got):\n%s", diff)
 			}
 
 			// Assuming a typical test execution environment, $HOME should be
 			// collected and pushed to this test zedhookd instance.
-			i := slices.IndexFunc(p.Variables, func(v Variable) bool {
+			i := slices.IndexFunc(p.Variables, func(v zedhook.Variable) bool {
 				return v.Key == "HOME"
 			})
 			if i == -1 {
@@ -82,7 +83,7 @@ func TestClientPushDefaultsError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	c, err := NewClient("", nil)
+	c, err := zedhook.NewClient("", nil)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestClientPushDefaultsError(t *testing.T) {
 	}
 
 	// We control the error string, good enough.
-	for _, addr := range []string{defaultUNIX, defaultHTTP} {
+	for _, addr := range []string{zedhook.DefaultUNIX, zedhook.DefaultHTTP} {
 		if !strings.Contains(err.Error(), addr) {
 			t.Fatalf("did not find address %q in error %v", addr, err)
 		}
@@ -106,14 +107,14 @@ func TestClientPushDefaultsError(t *testing.T) {
 
 // testHTTP creates a Client backed by a TCP HTTP server which returns its
 // payload on a channel.
-func testHTTP(t *testing.T) (*Client, <-chan Payload) {
+func testHTTP(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
 	t.Helper()
 
 	handler, pC := testHandler()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
-	c, err := NewClient(srv.URL+"/push", nil)
+	c, err := zedhook.NewClient(srv.URL+"/push", nil)
 	if err != nil {
 		t.Fatalf("failed to create HTTP zedhook client: %v", err)
 	}
@@ -123,14 +124,14 @@ func testHTTP(t *testing.T) (*Client, <-chan Payload) {
 
 // testUNIX creates a Client backed by a UNIX socket HTTP server which returns
 // its payload on a channel.
-func testUNIX(t *testing.T) (*Client, <-chan Payload) {
+func testUNIX(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
 	t.Helper()
 
 	handler, pC := testHandler()
 	srv := unixtransport.NewTestServer(t, handler)
 	t.Cleanup(srv.Close)
 
-	c, err := NewClient(srv.URL+"/push", srv.Client())
+	c, err := zedhook.NewClient(srv.URL+"/push", srv.Client())
 	if err != nil {
 		t.Fatalf("failed to create UNIX+HTTP zedhook client: %v", err)
 	}
@@ -140,12 +141,12 @@ func testUNIX(t *testing.T) (*Client, <-chan Payload) {
 
 // testHandler creates a http.Handler and Payload channel which sends the
 // contents of the first request once decoded.
-func testHandler() (http.Handler, <-chan Payload) {
-	pC := make(chan Payload, 1)
+func testHandler() (http.Handler, <-chan zedhook.Payload) {
+	pC := make(chan zedhook.Payload, 1)
 
 	// Discard all logs, pass payload to pC.
-	h := NewHandler(log.New(io.Discard, "", 0))
-	h.OnPayload = func(p Payload) { pC <- p }
+	h := zedhook.NewHandler(log.New(io.Discard, "", 0))
+	h.OnPayload = func(p zedhook.Payload) { pC <- p }
 
 	return h, pC
 }
