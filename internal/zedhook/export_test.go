@@ -13,6 +13,11 @@
 
 package zedhook
 
+import (
+	"context"
+	"net"
+)
+
 // Default address values which are only exported for use in tests.
 const (
 	DefaultUNIX = defaultUNIX
@@ -21,3 +26,12 @@ const (
 
 // The expected JSON content type.
 const ContentJSON = contentJSON
+
+// TestServe exports serve for tests.
+func (s *Server) TestServe(ctx context.Context, l net.Listener) error {
+	return s.serve(ctx, l)
+}
+
+// PeercredContext fetches *peercred.Creds from an HTTP request context. The
+// Creds may be nil.
+var PeercredContext = peercredContext

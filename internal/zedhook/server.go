@@ -61,6 +61,13 @@ func peercredConnContext(ctx context.Context, c net.Conn) context.Context {
 	return ctx
 }
 
+// peercredContext fetches *peercred.Creds from an HTTP request context. The
+// Creds may be nil.
+func peercredContext(ctx context.Context) *peercred.Creds {
+	creds, _ := ctx.Value(keyCreds).(*peercred.Creds)
+	return creds
+}
+
 // A contextKey is an opaque structure used as a key for context.Context values.
 type contextKey struct{ name string }
 
@@ -84,7 +91,13 @@ func (s *Server) Serve(ctx context.Context) error {
 	unixL.SetUnlinkOnClose(true)
 
 	// Combine the listeners and serve connections on both at once.
-	l := multinet.Listen(tcpL, unixL)
+	return s.serve(ctx, multinet.Listen(tcpL, unixL))
+}
+
+// serve uses the net.Listener to serve the zedhook receiver, blocking until the
+// context is canceled. The Server will close the net.Listener on context
+// cancelation.
+func (s *Server) serve(ctx context.Context, l net.Listener) error {
 	defer l.Close()
 
 	// Listeners are ready, use Serve's context as a base.
@@ -114,8 +127,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", err)
 	}
 
-	// Also cleans up the UNIX socket file.
-	if err := l.Close(); err != nil {
+	// Also cleans up the UNIX socket file. Ignore errors relating to the
+	// listener already being closed by Shutdown above.
+	if err := l.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		return fmt.Errorf("failed to close HTTP listener: %v", err)
 	}
 
@@ -220,11 +234,10 @@ func (h *Handler) pushRequest(w http.ResponseWriter, r *http.Request) (*pushRequ
 
 	var (
 		// Fetch data stored in the request context. For UNIX sockets, creds
-		// will be non-nil; the comma-ok syntax is necessary in case the key is
-		// not set to avoid a panic.
-		ctx      = r.Context()
-		local    = ctx.Value(http.LocalAddrContextKey).(net.Addr)
-		creds, _ = ctx.Value(keyCreds).(*peercred.Creds)
+		// will be non-nil.
+		ctx   = r.Context()
+		local = ctx.Value(http.LocalAddrContextKey).(net.Addr)
+		creds = peercredContext(ctx)
 	)
 
 	return &pushRequest{
