@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -113,10 +114,9 @@ func (c *Client) Push(ctx context.Context) error {
 			doErr = fmt.Errorf("failed to push data: %v", err)
 			continue
 		}
-		_ = res.Body.Close()
 
-		if c := res.StatusCode; c != http.StatusNoContent {
-			doErr = fmt.Errorf("unexpected zedhookd response code: HTTP %d", c)
+		if err := checkResponse(res); err != nil {
+			doErr = err
 			continue
 		}
 
@@ -124,4 +124,26 @@ func (c *Client) Push(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("could not reach zedhookd using addresses %v: %v", c.addrs, doErr)
+}
+
+// checkResponse drains an HTTP response and produces an error for HTTP status
+// codes other than 204 No Content.
+func checkResponse(res *http.Response) error {
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode == http.StatusNoContent {
+		// No body, nothing to do.
+		_, _ = io.Copy(io.Discard, res.Body)
+		return nil
+	}
+
+	// Drain error response message. zedhookd sends very short error messages
+	// purely for client informational output.
+	body, err := io.ReadAll(io.LimitReader(res.Body, 128))
+	if err != nil {
+		return fmt.Errorf("failed to drain response body: %v", err)
+	}
+
+	return fmt.Errorf("unexpected zedhookd response code: HTTP %d: %q",
+		res.StatusCode, string(bytes.TrimSpace(body)))
 }

@@ -107,6 +107,30 @@ func TestClientPushDefaultsError(t *testing.T) {
 	t.Logf("err: %v", err)
 }
 
+func TestClientPushErrorHTTPStatus(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	srv := httptest.NewServer(http.HandlerFunc(http.NotFound))
+	t.Cleanup(srv.Close)
+
+	c, err := zedhook.NewClient(srv.URL+"/push", nil)
+	if err != nil {
+		t.Fatalf("failed to create HTTP zedhook client: %v", err)
+	}
+
+	err = c.Push(ctx)
+	if err == nil {
+		t.Fatal("expected an error, but none occurred")
+	}
+
+	if !strings.Contains(err.Error(), `HTTP 404: "404 page not found"`) {
+		t.Fatalf("expected HTTP 404 error, but got: %v", err)
+	}
+
+	t.Logf("err: %v", err)
+}
+
 // testHTTP creates a Client backed by a TCP HTTP server which returns its
 // payload on a channel.
 func testHTTP(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
