@@ -155,50 +155,95 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // push implements the HTTP POST push logic for the all-zedhook ZEDLET.
 func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
+	pr, ok := h.pushRequest(w, r)
+	if !ok {
+		// Middleware already wrote HTTP response.
+		return
+	}
+
+	if pr.Creds != nil {
+		h.ll.Printf("local: %s, peer: %s, creds: %+v", pr.Local, r.RemoteAddr, pr.Creds)
+	} else {
+		h.ll.Printf("local: %s, peer: %s", pr.Local, r.RemoteAddr)
+	}
+
+	h.ll.Printf("client: %s, payload: %d variables", r.RemoteAddr, len(pr.Payload.Variables))
+
+	if h.OnPayload != nil {
+		// Fire payload hook.
+		h.OnPayload(pr.Payload)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// A pushRequest contains HTTP request data sent by a client to the push handler.
+type pushRequest struct {
+	Payload Payload
+	Local   net.Addr
+	// May be nil if connection did not arrive over UNIX socket.
+	Creds *peercred.Creds
+}
+
+// pushRequest is a middleware which parses a valid pushRequest or returns an
+// HTTP error status to the client due to an invalid request. If pushRequest
+// returns true, the request is valid and can be processed.
+func (h *Handler) pushRequest(w http.ResponseWriter, r *http.Request) (*pushRequest, bool) {
 	// We expect client push to use one-shot requests from the ZEDLET and
 	// therefore there's no advantage to keepalives.
 	w.Header().Set("Connection", "close")
 
-	// TODO(mdlayher): consider factoring out middleware for request validation.
 	if r.Method != http.MethodPost {
-		h.ll.Printf("%s: method not allowed: %q", r.RemoteAddr, r.Method)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+		return h.errorf(
+			w, r,
+			http.StatusMethodNotAllowed,
+			"method not allowed: %q", r.Method,
+		)
 	}
 
 	if ct := r.Header.Get("Content-Type"); ct != contentJSON {
-		h.ll.Printf("%s: bad request content type: %q", r.RemoteAddr, ct)
-		http.Error(w, "bad request content type", http.StatusBadRequest)
-		return
+		return h.errorf(
+			w, r,
+			http.StatusBadRequest,
+			"bad request content type: %q", ct,
+		)
 	}
 
 	var p Payload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		h.ll.Printf("%s: bad request payload: %v", r.RemoteAddr, err)
-		http.Error(w, "bad request payload", http.StatusBadRequest)
-		return
+		return h.errorf(
+			w, r,
+			http.StatusBadRequest,
+			"bad request payload: %v", err,
+		)
 	}
 
 	var (
-		// Fetch data stored in the request context. For UNIX sockets, ok will
-		// be true and creds will be accessible.
-		ctx       = r.Context()
-		local     = ctx.Value(http.LocalAddrContextKey).(net.Addr)
-		creds, ok = ctx.Value(keyCreds).(*peercred.Creds)
+		// Fetch data stored in the request context. For UNIX sockets, creds
+		// will be non-nil; the comma-ok syntax is necessary in case the key is
+		// not set to avoid a panic.
+		ctx      = r.Context()
+		local    = ctx.Value(http.LocalAddrContextKey).(net.Addr)
+		creds, _ = ctx.Value(keyCreds).(*peercred.Creds)
 	)
 
-	if ok {
-		h.ll.Printf("local: %s, peer: %s, creds: %+v", local, r.RemoteAddr, creds)
-	} else {
-		h.ll.Printf("local: %s, peer: %s", local, r.RemoteAddr)
-	}
+	return &pushRequest{
+		Payload: p,
+		Local:   local,
+		Creds:   creds,
+	}, true
+}
 
-	h.ll.Printf("client: %s, payload: %d variables", r.RemoteAddr, len(p.Variables))
+// errorf writes a formatted error to the client and to the Handler's logger.
+// It always returns "nil, false" for use in h.pushRequest.
+func (h *Handler) errorf(
+	w http.ResponseWriter, r *http.Request,
+	status int,
+	format string, v ...any,
+) (*pushRequest, bool) {
+	text := fmt.Sprintf(format, v...)
 
-	if h.OnPayload != nil {
-		// Fire payload hook.
-		h.OnPayload(p)
-	}
-
-	w.WriteHeader(http.StatusNoContent)
+	h.ll.Printf("%s: %s", r.RemoteAddr, text)
+	http.Error(w, text, status)
+	return nil, false
 }
