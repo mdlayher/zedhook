@@ -62,7 +62,8 @@ func (s *sqlStorage) Close() error { return s.db.Close() }
 
 // Queries used by sqlStorage.
 const (
-	createEventsSchemaQuery = `CREATE TABLE IF NOT EXISTS events (
+	createEventsSchemaQuery = `--
+	CREATE TABLE IF NOT EXISTS events (
 		id        INTEGER PRIMARY KEY AUTOINCREMENT,
 		event_id  INTEGER NOT NULL,
 		timestamp INTEGER NOT NULL,
@@ -70,11 +71,17 @@ const (
 		zpool     TEXT NOT NULL
 	);`
 
-	listEventsQuery = `SELECT * FROM events`
+	listEventsQuery = `--
+	SELECT
+		id, event_id, timestamp, class, zpool
+	FROM events;
+	`
 
-	saveEventQuery = `INSERT INTO events (
+	saveEventQuery = `--
+	INSERT INTO events (
 		event_id, timestamp, class, zpool
-	) VALUES (?, ?, ?, ?);`
+	) VALUES (?, ?, ?, ?);
+	`
 )
 
 // ListEvents implements Storage.
