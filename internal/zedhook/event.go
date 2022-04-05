@@ -14,10 +14,13 @@
 package zedhook
 
 import (
+	"database/sql"
 	"fmt"
 	"strconv"
 	"time"
 )
+
+var _ scanner[Event] = Event{}
 
 // An Event is the processed version of a client Payload.
 type Event struct {
@@ -56,5 +59,20 @@ func parseEvent(p Payload) (Event, error) {
 	}
 
 	e.Timestamp = time.Unix(sec, nsec)
+	return e, nil
+}
+
+// scan implements scanner[Event].
+func (Event) scan(rows *sql.Rows) (Event, error) {
+	var (
+		e    Event
+		unix int64
+	)
+
+	if err := rows.Scan(&e.ID, &e.EventID, &unix, &e.Class, &e.Zpool); err != nil {
+		return Event{}, err
+	}
+
+	e.Timestamp = time.Unix(0, unix)
 	return e, nil
 }

@@ -18,7 +18,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -86,38 +85,7 @@ const (
 
 // ListEvents implements Storage.
 func (s *sqlStorage) ListEvents(ctx context.Context) ([]Event, error) {
-	var events []Event
-	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, listEventsQuery)
-		if err != nil {
-			return fmt.Errorf("failed to query events: %v", err)
-		}
-
-		for rows.Next() {
-			var (
-				e    Event
-				unix int64
-			)
-
-			if err := rows.Scan(&e.ID, &e.EventID, &unix, &e.Class, &e.Zpool); err != nil {
-				return fmt.Errorf("failed to scan event: %v", err)
-			}
-
-			e.Timestamp = time.Unix(0, unix)
-			events = append(events, e)
-		}
-
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("failed to iterate rows: %v", err)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return events, nil
+	return queryList[Event](ctx, s, listEventsQuery)
 }
 
 // SaveEvent implements Storage.
@@ -167,4 +135,41 @@ func (s *sqlStorage) withTx(
 	}
 
 	return nil
+}
+
+// A scanner is a type which can scan database rows and produce results of its
+// own type.
+type scanner[T any] interface {
+	scan(rows *sql.Rows) (T, error)
+}
+
+// queryList produces []T from a type which implements scanner[T].
+func queryList[T scanner[T]](ctx context.Context, s *sqlStorage, query string) ([]T, error) {
+	var ts []T
+	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, query)
+		if err != nil {
+			return fmt.Errorf("failed to query for %T: %v", ts, err)
+		}
+
+		for rows.Next() {
+			var t T
+			t, err := t.scan(rows)
+			if err != nil {
+				return fmt.Errorf("failed to scan for %T: %v", t, err)
+			}
+			ts = append(ts, t)
+		}
+
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to iterate rows for %T: %v", ts, err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ts, nil
 }
