@@ -145,13 +145,18 @@ type Handler struct {
 	// with the contents of the Payload.
 	OnPayload func(p Payload)
 
+	s   Storage
 	mux http.Handler
 	ll  *log.Logger
 }
 
-// NewHandler constructs an http.Handler for use with the Server.
-func NewHandler(ll *log.Logger) *Handler {
-	h := &Handler{ll: ll}
+// NewHandler constructs an http.Handler for use with the Server. If Storage is
+// nil, no data will be persisted between zedhookd runs.
+func NewHandler(s Storage, ll *log.Logger) *Handler {
+	h := &Handler{
+		s:  s,
+		ll: ll,
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/push", h.push)
@@ -182,6 +187,19 @@ func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.ll.Printf("client: %s, payload: %d variables", r.RemoteAddr, len(pr.Payload.Variables))
+
+	// TODO(mdlayher): consider combining with h.OnPayload.
+	if h.s != nil {
+		event, err := parseEvent(pr.Payload)
+		if err != nil {
+			return
+		}
+
+		if err := h.s.SaveEvent(context.Background(), event); err != nil {
+			h.ll.Printf("%s: failed to save client event: %v", r.RemoteAddr, err)
+			return
+		}
+	}
 
 	if h.OnPayload != nil {
 		// Fire payload hook.

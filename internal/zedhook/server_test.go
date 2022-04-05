@@ -137,7 +137,7 @@ func TestHandlerErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, pC := testHandler()
+			handler, pC := testHandler(nil)
 			srv := httptest.NewServer(handler)
 			defer srv.Close()
 

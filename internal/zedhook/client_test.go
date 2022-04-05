@@ -36,7 +36,7 @@ import (
 func TestClientPush(t *testing.T) {
 	tests := []struct {
 		name string
-		fn   func(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload)
+		fn   func(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload)
 	}{
 		{
 			name: "HTTP",
@@ -50,11 +50,22 @@ func TestClientPush(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, pC := tt.fn(t)
-
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
+			// TODO(mdlayher): factor out ephemeral storage constructor.
+			s, err := zedhook.NewStorage(ctx, ":memory:")
+			if err != nil {
+				t.Fatalf("failed to open storage: %v", err)
+			}
+			defer s.Close()
+
+			c, pC := tt.fn(t, s)
+
+			// Fun fact, mdlayher argued against adding this before using it in
+			// this code about 1.5 years later:
+			// https://github.com/golang/go/issues/41260#issuecomment-688378662
+			t.Setenv("ZEVENT_POOL", "tank")
 			if err := c.Push(ctx); err != nil {
 				t.Fatalf("failed to push: %v", err)
 			}
@@ -76,6 +87,23 @@ func TestClientPush(t *testing.T) {
 
 			if diff := cmp.Diff(os.Getenv("HOME"), p.Variables[i].Value); diff != "" {
 				t.Fatalf("unexpected $HOME value (-want +got):\n%s", diff)
+			}
+
+			// We're done pushing events, so verify that the server parsed our
+			// payload successfully and noted the input zpool.
+			events, err := s.ListEvents(ctx)
+			if err != nil {
+				t.Fatalf("failed to list events: %v", err)
+			}
+
+			want := []zedhook.Event{{
+				ID:        1,
+				Timestamp: time.Unix(0, 0),
+				Zpool:     "tank",
+			}}
+
+			if diff := cmp.Diff(want, events); diff != "" {
+				t.Fatalf("unexpected Events (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -133,10 +161,10 @@ func TestClientPushErrorHTTPStatus(t *testing.T) {
 
 // testHTTP creates a Client backed by a TCP HTTP server which returns its
 // payload on a channel.
-func testHTTP(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
+func testHTTP(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload) {
 	t.Helper()
 
-	handler, pC := testHandler()
+	handler, pC := testHandler(s)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
@@ -150,10 +178,10 @@ func testHTTP(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
 
 // testUNIX creates a Client backed by a UNIX socket HTTP server which returns
 // its payload on a channel.
-func testUNIX(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
+func testUNIX(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload) {
 	t.Helper()
 
-	handler, pC := testHandler()
+	handler, pC := testHandler(s)
 	srv := httptest.NewUnstartedServer(handler)
 	unixtransportInstall(t, srv)
 
@@ -167,11 +195,11 @@ func testUNIX(t *testing.T) (*zedhook.Client, <-chan zedhook.Payload) {
 
 // testHandler creates a http.Handler and Payload channel which sends the
 // contents of the first request once decoded.
-func testHandler() (http.Handler, <-chan zedhook.Payload) {
+func testHandler(s zedhook.Storage) (http.Handler, <-chan zedhook.Payload) {
 	pC := make(chan zedhook.Payload, 1)
 
 	// Discard all logs, pass payload to pC.
-	h := zedhook.NewHandler(log.New(io.Discard, "", 0))
+	h := zedhook.NewHandler(s, log.New(io.Discard, "", 0))
 	h.OnPayload = func(p zedhook.Payload) { pC <- p }
 
 	return h, pC

@@ -31,9 +31,16 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	// TODO(mdlayher): make configurable.
+	s, err := zedhook.NewStorage(ctx, "zedhookd.db")
+	if err != nil {
+		log.Fatalf("failed to open storage: %v", err)
+	}
+	defer s.Close()
+
 	var (
 		ll  = log.New(os.Stderr, "", log.LstdFlags)
-		srv = zedhook.NewServer(zedhook.NewHandler(ll), ll)
+		srv = zedhook.NewServer(zedhook.NewHandler(s, ll), ll)
 	)
 
 	if err := srv.Serve(ctx); err != nil {
