@@ -26,6 +26,7 @@ import (
 
 	"github.com/mdlayher/zedhook/internal/zedhook"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 func main() {
@@ -41,9 +42,10 @@ func main() {
 
 	reg := prometheus.NewPedanticRegistry()
 	reg.MustRegister(
-		prometheus.NewBuildInfoCollector(),
-		prometheus.NewGoCollector(),
-		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
+		collectors.NewBuildInfoCollector(),
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		// TODO(mdlayher): collectors.NewDBStatsCollector.
 	)
 
 	var (

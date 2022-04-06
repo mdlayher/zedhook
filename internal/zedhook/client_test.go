@@ -30,6 +30,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/mdlayher/zedhook/internal/zedhook"
 	"github.com/peterbourgon/unixtransport"
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/exp/slices"
 )
 
@@ -199,7 +200,7 @@ func testHandler(s zedhook.Storage) (http.Handler, <-chan zedhook.Payload) {
 	pC := make(chan zedhook.Payload, 1)
 
 	// Discard all logs, pass payload to pC.
-	h := zedhook.NewHandler(s, log.New(io.Discard, "", 0))
+	h := zedhook.NewHandler(s, log.New(io.Discard, "", 0), prometheus.NewPedanticRegistry())
 	h.OnPayload = func(p zedhook.Payload) { pC <- p }
 
 	return h, pC
