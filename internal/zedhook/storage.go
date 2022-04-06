@@ -85,7 +85,7 @@ const (
 
 // ListEvents implements Storage.
 func (s *sqlStorage) ListEvents(ctx context.Context) ([]Event, error) {
-	return queryList[Event](ctx, s, listEventsQuery)
+	return queryList(ctx, s, listEventsQuery, (*Event).scan)
 }
 
 // SaveEvent implements Storage.
@@ -137,14 +137,15 @@ func (s *sqlStorage) withTx(
 	return nil
 }
 
-// A scanner is a type which can scan database rows and produce results of its
-// own type.
-type scanner[T any] interface {
-	scan(rows *sql.Rows) (T, error)
-}
-
-// queryList produces []T from a type which implements scanner[T].
-func queryList[T scanner[T]](ctx context.Context, s *sqlStorage, query string) ([]T, error) {
+// queryList produces []T from a type which has a method that can scan rows into
+// itself.
+func queryList[T any](
+	ctx context.Context,
+	s *sqlStorage,
+	query string,
+	// A method expression which allows *T to scan *sql.Rows data into itself.
+	scan func(t *T, rows *sql.Rows) error,
+) ([]T, error) {
 	var ts []T
 	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, query)
@@ -154,8 +155,7 @@ func queryList[T scanner[T]](ctx context.Context, s *sqlStorage, query string) (
 
 		for rows.Next() {
 			var t T
-			t, err := t.scan(rows)
-			if err != nil {
+			if err := scan(&t, rows); err != nil {
 				return fmt.Errorf("failed to scan for %T: %v", t, err)
 			}
 			ts = append(ts, t)

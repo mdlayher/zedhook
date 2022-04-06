@@ -20,8 +20,6 @@ import (
 	"time"
 )
 
-var _ scanner[Event] = Event{}
-
 // An Event is the processed version of a client Payload.
 type Event struct {
 	ID, EventID  int
@@ -63,16 +61,12 @@ func parseEvent(p Payload) (Event, error) {
 }
 
 // scan implements scanner[Event].
-func (Event) scan(rows *sql.Rows) (Event, error) {
-	var (
-		e    Event
-		unix int64
-	)
-
+func (e *Event) scan(rows *sql.Rows) error {
+	var unix int64
 	if err := rows.Scan(&e.ID, &e.EventID, &unix, &e.Class, &e.Zpool); err != nil {
-		return Event{}, err
+		return err
 	}
 
 	e.Timestamp = time.Unix(0, unix)
-	return e, nil
+	return nil
 }
