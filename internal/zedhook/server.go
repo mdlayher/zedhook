@@ -18,12 +18,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/mdlayher/metricslite"
 	"github.com/mdlayher/netx/multinet"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sync/errgroup"
 	"inet.af/peercred"
 )
@@ -77,21 +82,32 @@ var keyCreds = &contextKey{"peercred"}
 // Serve serves the zedhookd receiver and blocks until the context is canceled.
 func (s *Server) Serve(ctx context.Context) error {
 	// TODO(mdlayher): make configurable, default to UNIX and HTTP.
+	var ls []net.Listener
+
 	tcpL, err := net.Listen("tcp", "localhost:9919")
 	if err != nil {
 		return fmt.Errorf("failed to listen TCP: %v", err)
 	}
+	ls = append(ls, tcpL)
 
 	unixL, err := net.ListenUnix("unix", &net.UnixAddr{
 		Name: "/run/zedhookd/zedhookd.sock",
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		// OK, continue setup.
+		ls = append(ls, unixL)
+		unixL.SetUnlinkOnClose(true)
+	case errors.Is(err, os.ErrNotExist):
+		// Parent directory doesn't exist.
+		s.logf("skipping UNIX listener setup: %v", err)
+	default:
+		// Terminal error.
 		return fmt.Errorf("failed to listen UNIX: %v", err)
 	}
-	unixL.SetUnlinkOnClose(true)
 
 	// Combine the listeners and serve connections on both at once.
-	return s.serve(ctx, multinet.Listen(tcpL, unixL))
+	return s.serve(ctx, multinet.Listen(ls...))
 }
 
 // serve uses the net.Listener to serve the zedhook receiver, blocking until the
@@ -103,7 +119,7 @@ func (s *Server) serve(ctx context.Context, l net.Listener) error {
 	// Listeners are ready, use Serve's context as a base.
 	s.srv.BaseContext = func(_ net.Listener) context.Context { return ctx }
 
-	s.ll.Printf("started server, listeners: %v", l.Addr())
+	s.logf("started server, listeners: %v", l.Addr())
 
 	var eg errgroup.Group
 	eg.Go(func() error {
@@ -115,7 +131,7 @@ func (s *Server) serve(ctx context.Context, l net.Listener) error {
 	})
 
 	<-ctx.Done()
-	s.ll.Println("server signaled, shutting down")
+	s.logf("server signaled, shutting down")
 
 	// We received a signal. This context is detached from parent because the
 	// parent is already canceled but we want to give a short period of time for
@@ -136,6 +152,15 @@ func (s *Server) serve(ctx context.Context, l net.Listener) error {
 	return nil
 }
 
+// logf logs a formatted log if the Server logger is not nil.
+func (s *Server) logf(format string, v ...any) {
+	if s.ll == nil {
+		return
+	}
+
+	s.ll.Printf(format, v...)
+}
+
 var _ http.Handler = (*Handler)(nil)
 
 // A Handler is an http.Handler for zedhookd logic.
@@ -148,19 +173,23 @@ type Handler struct {
 	s   Storage
 	mux http.Handler
 	ll  *log.Logger
+	mm  metrics
 }
 
 // NewHandler constructs an http.Handler for use with the Server. If Storage is
 // nil, no data will be persisted between zedhookd runs.
-func NewHandler(s Storage, ll *log.Logger) *Handler {
+func NewHandler(s Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
 	h := &Handler{
 		s:  s,
 		ll: ll,
+		mm: newMetrics(metricslite.NewPrometheus(reg)),
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/push", h.push)
-	// TODO(mdlayher): Prometheus metrics.
+	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+		ErrorLog: ll,
+	}))
 
 	h.mux = mux
 	return h
@@ -169,6 +198,13 @@ func NewHandler(s Storage, ll *log.Logger) *Handler {
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Server", "zedhook")
+
+	if r.URL.Path == "/" {
+		// TODO(mdlayher): banner.
+		_, _ = io.WriteString(w, "zedhookd\n")
+		return
+	}
+
 	h.mux.ServeHTTP(w, r)
 }
 
@@ -177,26 +213,27 @@ func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
 	pr, ok := h.pushRequest(w, r)
 	if !ok {
 		// Middleware already wrote HTTP response.
+		h.mm.PushErrorsTotal(1.0)
 		return
 	}
 
 	if pr.Creds != nil {
-		h.ll.Printf("local: %s, peer: %s, creds: %+v", pr.Local, r.RemoteAddr, pr.Creds)
+		h.logf(r, "local: %s, creds: %+v", pr.Local, pr.Creds)
 	} else {
-		h.ll.Printf("local: %s, peer: %s", pr.Local, r.RemoteAddr)
+		h.logf(r, "local: %s", pr.Local)
 	}
 
-	h.ll.Printf("client: %s, payload: %d variables", r.RemoteAddr, len(pr.Payload.Variables))
+	h.logf(r, "payload: %d variables", len(pr.Payload.Variables))
+
+	event, err := parseEvent(pr.Payload)
+	if err != nil {
+		return
+	}
 
 	// TODO(mdlayher): consider combining with h.OnPayload.
 	if h.s != nil {
-		event, err := parseEvent(pr.Payload)
-		if err != nil {
-			return
-		}
-
 		if err := h.s.SaveEvent(context.Background(), event); err != nil {
-			h.ll.Printf("%s: failed to save client event: %v", r.RemoteAddr, err)
+			h.logf(r, "failed to save client event: %v", err)
 			return
 		}
 	}
@@ -206,6 +243,7 @@ func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
 		h.OnPayload(pr.Payload)
 	}
 
+	h.mm.PushTotal(1, event.Zpool)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -274,7 +312,47 @@ func (h *Handler) errorf(
 ) (*pushRequest, bool) {
 	text := fmt.Sprintf(format, v...)
 
-	h.ll.Printf("%s: %s", r.RemoteAddr, text)
+	h.logf(r, text)
 	http.Error(w, text, status)
 	return nil, false
+}
+
+// logf logs a formatted log for a client request if the Handler logger is not
+// nil.
+func (h *Handler) logf(r *http.Request, format string, v ...any) {
+	if h.ll == nil {
+		return
+	}
+
+	h.ll.Printf("%s: %s", r.RemoteAddr, fmt.Sprintf(format, v...))
+}
+
+// metrics contains metrics for the zedhookd handler.
+type metrics struct {
+	PushTotal, PushErrorsTotal metricslite.Counter
+}
+
+// newMetrics produces metrics based on the input metricslite.Interface.
+func newMetrics(mm metricslite.Interface) metrics {
+	return metrics{
+		PushTotal: mm.Counter(
+			"zedhook_push_total",
+			"The number of times a client successfully pushed data to the zedhookd server, partitioned by ZFS pool.",
+			// TODO(mdlayher): ultimately the values for this field are created
+			// by user input which means we could experience a cardinality
+			// explosion in the case of malicious input. The intent is for
+			// all-zedhook and zedhookd to live on the same system and
+			// communicate over localhost, but there's no way to know for sure
+			// that a given pool actually exists unless we exec in this server,
+			// which is something we'd like to avoid.
+			//
+			// Reconsider in the the future.
+			"zpool",
+		),
+
+		PushErrorsTotal: mm.Counter(
+			"zedhook_push_errors_total",
+			"The number of times a client pushed invalid data to the zedhookd server.",
+		),
+	}
 }

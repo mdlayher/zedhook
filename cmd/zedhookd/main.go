@@ -25,6 +25,7 @@ import (
 	"os/signal"
 
 	"github.com/mdlayher/zedhook/internal/zedhook"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func main() {
@@ -38,9 +39,19 @@ func main() {
 	}
 	defer s.Close()
 
+	reg := prometheus.NewPedanticRegistry()
+	reg.MustRegister(
+		prometheus.NewBuildInfoCollector(),
+		prometheus.NewGoCollector(),
+		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
+	)
+
 	var (
 		ll  = log.New(os.Stderr, "", log.LstdFlags)
-		srv = zedhook.NewServer(zedhook.NewHandler(s, ll), ll)
+		srv = zedhook.NewServer(
+			zedhook.NewHandler(s, ll, reg),
+			ll,
+		)
 	)
 
 	if err := srv.Serve(ctx); err != nil {
