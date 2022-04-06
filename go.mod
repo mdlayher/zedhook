@@ -4,12 +4,11 @@ go 1.18
 
 require (
 	github.com/google/go-cmp v0.5.7
-	github.com/peterbourgon/unixtransport v0.0.1
-	golang.org/x/exp v0.0.0-20220328175248-053ad81199eb
-)
-
-require (
+	github.com/mdlayher/metricslite v0.0.0-20220406114248-d75c70dd4887
 	github.com/mdlayher/netx v0.0.0-20200512211805-669a06fde734
+	github.com/peterbourgon/unixtransport v0.0.1
+	github.com/prometheus/client_golang v1.12.1
+	golang.org/x/exp v0.0.0-20220328175248-053ad81199eb
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	inet.af/peercred v0.0.0-20210906144145-0893ea02156a
 	modernc.org/sqlite v1.16.0
@@ -23,8 +22,6 @@ require (
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/mattn/go-isatty v0.0.12 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
-	github.com/mdlayher/metricslite v0.0.0-20220406114248-d75c70dd4887 // indirect
-	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.33.0 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
