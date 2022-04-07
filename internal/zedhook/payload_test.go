@@ -20,17 +20,26 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-const testStatus = `  pool: test
+const testStatus = `
+  pool: test
  state: ONLINE
-  scan: scrub repaired 0B in 00:00:00 with 0 errors on Tue Mar 29 19:11:58 2022
+  scan: scrub repaired 0B in 03:49:05 with 0 errors on Sun Apr  3 05:49:29 2022
 config:
 
-        NAME              STATE     READ WRITE CKSUM
-        test              ONLINE       0     0     0
-          /root/tank.img  ONLINE       0     0     0
+        NAME                                                                   STATE     READ WRITE CKSUM  SLOW
+        primary                                                                ONLINE       0     0     0     0
+          mirror-0                                                             ONLINE       0     0     0     0
+            /dev/disk/by-id/ata-ST18000NM000J-2TV103_00000000-part1            ONLINE       0     0     0     0  (uninitialized)  (trim unsupported)
+            /dev/disk/by-id/ata-ST18000NM000J-2TV103_00000001-part1            ONLINE       0     0     0     0  (uninitialized)  (trim unsupported)
+          mirror-1                                                             ONLINE       0     0     0     0
+            /dev/disk/by-id/ata-ST18000NM000J-2TV103_00000002-part1            ONLINE       0     0     0     0  (uninitialized)  (trim unsupported)
+            /dev/disk/by-id/ata-ST18000NM000J-2TV103_00000003-part1            ONLINE       0     0     0     0  (uninitialized)  (trim unsupported)
+        special
+          mirror-2                                                             ONLINE       0     0     0     0
+            /dev/disk/by-id/ata-Samsung_SSD_870_EVO_1TB_000000000000000-part1  ONLINE       0     0     0     0  (uninitialized)  (100% trimmed, completed at Mon 04 Apr 2022 12:00:46 AM EDT)
+            /dev/disk/by-id/ata-Samsung_SSD_870_EVO_1TB_000000000000001-part1  ONLINE       0     0     0     0  (uninitialized)  (100% trimmed, completed at Mon 04 Apr 2022 12:00:46 AM EDT)
 
 errors: No known data errors
-
 `
 
 func Test_makePayload(t *testing.T) {

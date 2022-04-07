@@ -109,7 +109,14 @@ type execFunc func(ctx context.Context, zpool, pool string) ([]byte, error)
 
 // execZpoolStatus is an execFunc which uses exec.Command.
 func execZpoolStatus(ctx context.Context, zpool, pool string) ([]byte, error) {
-	return exec.CommandContext(ctx, zpool, "status", pool).CombinedOutput()
+	return exec.CommandContext(
+		ctx,
+		zpool,
+		"status",
+		// Provide very detailed pool status.
+		"-ipstvP",
+		pool,
+	).CombinedOutput()
 }
 
 // makePayload is a testable function which produces a Payload from a set of
