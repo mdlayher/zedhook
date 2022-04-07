@@ -137,14 +137,19 @@ func (s *sqlStorage) withTx(
 	return nil
 }
 
+// scanner is an interface matching the signature of (*sql.Rows).Scan.
+type scanner interface {
+	Scan(dest ...any) error
+}
+
 // queryList produces []T from a type which has a method that can scan rows into
 // itself.
 func queryList[T any](
 	ctx context.Context,
 	s *sqlStorage,
 	query string,
-	// A method expression which allows *T to scan *sql.Rows data into itself.
-	scan func(t *T, rows *sql.Rows) error,
+	// A method expression which allows *T to scan data into itself.
+	scan func(t *T, s scanner) error,
 ) ([]T, error) {
 	var ts []T
 	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {

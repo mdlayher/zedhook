@@ -14,7 +14,6 @@
 package zedhook
 
 import (
-	"database/sql"
 	"fmt"
 	"strconv"
 	"time"
@@ -60,10 +59,10 @@ func parseEvent(p Payload) (Event, error) {
 	return e, nil
 }
 
-// scan implements scanner[Event].
-func (e *Event) scan(rows *sql.Rows) error {
+// scan uses the scanner to populate Event.
+func (e *Event) scan(s scanner) error {
 	var unix int64
-	if err := rows.Scan(&e.ID, &e.EventID, &unix, &e.Class, &e.Zpool); err != nil {
+	if err := s.Scan(&e.ID, &e.EventID, &unix, &e.Class, &e.Zpool); err != nil {
 		return err
 	}
 
