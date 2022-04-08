@@ -14,8 +14,10 @@
 package zedhook
 
 import (
+	"bufio"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -68,4 +70,102 @@ func (e *Event) scan(s scanner) error {
 
 	e.Timestamp = time.Unix(0, unix)
 	return nil
+}
+
+// A zpoolStatus contains parsed output from zpool status.
+type zpoolStatus struct {
+	Header zpoolHeader
+}
+
+// A zpoolHeader is the header output from zpool status.
+type zpoolHeader struct {
+	Pool, State string
+	Scan        []string
+}
+
+// A zpoolParser is a type which consumes zpool status output to produce a
+// zpoolStatus structure.
+type zpoolParser struct {
+	s *bufio.Scanner
+}
+
+// parseZpoolStatus returns a zpoolStatus from raw zpool status output.
+func parseZpoolStatus(status string) (zpoolStatus, error) {
+	zp := &zpoolParser{
+		// Clean up leading and trailing newlines first.
+		s: bufio.NewScanner(strings.NewReader(strings.TrimSpace(status))),
+	}
+
+	zh, err := zp.header()
+	if err != nil {
+		return zpoolStatus{}, fmt.Errorf("failed to parse header: %v", err)
+	}
+
+	return zpoolStatus{Header: zh}, nil
+}
+
+// header produces a zpoolHeader from the zpoolParser's current location.
+func (zp *zpoolParser) header() (zpoolHeader, error) {
+	var zh zpoolHeader
+
+	for zp.s.Scan() {
+		// Begin scanning lines.
+		//
+		// TODO(mdlayher): any key can have multiple lines. Generalize.
+		text := strings.TrimSpace(zp.s.Text())
+		if strings.HasPrefix(text, "scan:") {
+			scan, err := zp.headerScan(text)
+			if err != nil {
+				return zpoolHeader{}, err
+			}
+
+			zh.Scan = scan
+			text = zp.s.Text()
+		}
+
+		k, v, ok := strings.Cut(text, ":")
+		if !ok {
+			return zpoolHeader{}, fmt.Errorf("unexpected header status line: %s", zp.s.Text())
+		}
+
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+
+		switch k {
+		case "config":
+			// Start of pool topology section.
+			return zh, nil
+		case "pool":
+			zh.Pool = v
+		case "state":
+			zh.State = v
+		}
+	}
+
+	return zpoolHeader{}, fmt.Errorf("unexpected end of header: %v", zp.s.Err())
+}
+
+// headerScan scans header lines for the scan statement.
+func (zp *zpoolParser) headerScan(text string) ([]string, error) {
+	_, v, ok := strings.Cut(text, ":")
+	if !ok {
+		return nil, fmt.Errorf("unexpected header scan line: %s", text)
+	}
+
+	lines := []string{strings.TrimSpace(v)}
+
+	for zp.s.Scan() {
+		text := strings.TrimSpace(zp.s.Text())
+		if strings.HasPrefix(text, "config:") {
+			return lines, nil
+		} else {
+			lines = append(lines, text)
+		}
+	}
+
+	return nil, fmt.Errorf("did not find termination for scan section: %v", zp.s.Err())
+}
+
+func panicf(format string, a ...interface{}) {
+	panic(fmt.Sprintf(format, a...))
 }
