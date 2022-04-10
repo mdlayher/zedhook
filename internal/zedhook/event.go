@@ -165,7 +165,3 @@ func (zp *zpoolParser) headerScan(text string) ([]string, error) {
 
 	return nil, fmt.Errorf("did not find termination for scan section: %v", zp.s.Err())
 }
-
-func panicf(format string, a ...interface{}) {
-	panic(fmt.Sprintf(format, a...))
-}
