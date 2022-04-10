@@ -25,13 +25,12 @@ import (
 // TODO(mdlayher): consider adding a transactional interface to Storage if we
 // need to bulk-insert data.
 
-// TODO(mdlayher): pagination support for ListEvents.
-
 // Storage is the interface implemented by persistent storage types for
 // zedhookd.
 type Storage interface {
 	io.Closer
 	ListEvents(ctx context.Context) ([]Event, error)
+	ListEventsOffsetLimit(ctx context.Context, offset, limit int) ([]Event, error)
 	SaveEvent(ctx context.Context, event Event) error
 }
 
@@ -85,7 +84,14 @@ const (
 	listEventsQuery = `--
 	SELECT
 		id, event_id, timestamp, class, zpool
-	FROM events;
+	FROM events
+	`
+
+	listEventsLimitQuery = `--
+	SELECT
+		id, event_id, timestamp, class, zpool
+	FROM events
+	LIMIT ?, ?
 	`
 
 	saveEventQuery = `--
@@ -97,7 +103,12 @@ const (
 
 // ListEvents implements Storage.
 func (s *sqlStorage) ListEvents(ctx context.Context) ([]Event, error) {
-	return queryList(ctx, s, listEventsQuery, (*Event).scan)
+	return queryList(ctx, s, (*Event).scan, listEventsQuery)
+}
+
+// ListEventsOffsetLimit implements Storage.
+func (s *sqlStorage) ListEventsOffsetLimit(ctx context.Context, offset, limit int) ([]Event, error) {
+	return queryList(ctx, s, (*Event).scan, listEventsLimitQuery, offset, limit)
 }
 
 // SaveEvent implements Storage.
@@ -121,7 +132,7 @@ func (s *sqlStorage) SaveEvent(ctx context.Context, e Event) error {
 	_, err := s.db.ExecContext(
 		ctx,
 		saveEventQuery,
-		e.ID,
+		e.EventID,
 		e.Timestamp.UnixNano(),
 		e.Class,
 		e.Zpool,
@@ -173,13 +184,15 @@ type scanner interface {
 func queryList[T any](
 	ctx context.Context,
 	s *sqlStorage,
-	query string,
 	// A method expression which allows *T to scan data into itself.
 	scan func(t *T, s scanner) error,
+	// The query to perform and any associated prepared arguments.
+	query string,
+	args ...any,
 ) ([]T, error) {
 	var ts []T
 	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, query)
+		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("failed to query for %T: %v", ts, err)
 		}

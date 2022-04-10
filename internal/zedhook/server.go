@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/mdlayher/metricslite"
@@ -187,6 +188,7 @@ func NewHandler(s Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/push", h.push)
+	mux.HandleFunc("/events", h.events)
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{
 		ErrorLog: ll,
 	}))
@@ -206,6 +208,56 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.mux.ServeHTTP(w, r)
+}
+
+// events implements GET /events.
+func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
+	var (
+		q = r.URL.Query()
+
+		offset, oOK = optInt(q.Get("offset"))
+		limit, lOK  = optInt(q.Get("limit"))
+
+		events []Event
+		err    error
+	)
+
+	if oOK || lOK {
+		events, err = h.s.ListEventsOffsetLimit(r.Context(), offset, limit)
+	} else {
+		events, err = h.s.ListEvents(r.Context())
+	}
+	if err != nil {
+		h.logf(r, "failed to list events: %v", err)
+		return
+	}
+
+	var body struct {
+		Page struct {
+			Offset int `json:"offset"`
+			Limit  int `json:"limit"`
+		} `json:"page"`
+		Events []Event `json:"events"`
+	}
+
+	body.Page.Offset = offset
+	body.Page.Limit = limit
+	body.Events = events
+
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func optInt(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+
+	return v, true
 }
 
 // push implements the HTTP POST push logic for the all-zedhook ZEDLET.
