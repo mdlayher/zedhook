@@ -43,7 +43,16 @@ func NewStorage(ctx context.Context, dsn string) (Storage, error) {
 		return nil, err
 	}
 
-	s := &sqlStorage{db: db}
+	s := &sqlStorage{
+		db: db,
+		semC: func() chan struct{} {
+			// Prepare the semaphore.
+			c := make(chan struct{}, 1)
+			c <- struct{}{}
+			return c
+		}(),
+	}
+
 	if err := s.setup(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create sqlite schema: %v", err)
 	}
@@ -54,7 +63,10 @@ func NewStorage(ctx context.Context, dsn string) (Storage, error) {
 var _ Storage = (*sqlStorage)(nil)
 
 // A sqlStorage is a Storage implementation backed by sqlite3.
-type sqlStorage struct{ db *sql.DB }
+type sqlStorage struct {
+	db   *sql.DB
+	semC chan struct{}
+}
 
 // Close implements Storage.
 func (s *sqlStorage) Close() error { return s.db.Close() }
@@ -90,17 +102,31 @@ func (s *sqlStorage) ListEvents(ctx context.Context) ([]Event, error) {
 
 // SaveEvent implements Storage.
 func (s *sqlStorage) SaveEvent(ctx context.Context, e Event) error {
-	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(
-			ctx,
-			saveEventQuery,
-			e.ID,
-			e.Timestamp.UnixNano(),
-			e.Class,
-			e.Zpool,
-		)
-		return err
-	})
+	// Notably this does not run within a transaction: we ran into SQLITE_BUSY
+	// problems before and there's no real need to open a transaction for a
+	// single write to begin with. Instead acquire and release a semaphore to
+	// gate individual writes.
+	//
+	// TODO(mdlayher): this resolves busy locking but ultimately we should
+	// consider moving to a batching/flushing model within a longer running
+	// transaction. Investigate.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.semC:
+		// Acquired, release on return.
+		defer func() { s.semC <- struct{}{} }()
+	}
+
+	_, err := s.db.ExecContext(
+		ctx,
+		saveEventQuery,
+		e.ID,
+		e.Timestamp.UnixNano(),
+		e.Class,
+		e.Zpool,
+	)
+	return err
 }
 
 // setup creates the schema for sqlStorage.
