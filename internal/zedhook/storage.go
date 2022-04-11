@@ -29,8 +29,7 @@ import (
 // zedhookd.
 type Storage interface {
 	io.Closer
-	ListEvents(ctx context.Context) ([]Event, error)
-	ListEventsOffsetLimit(ctx context.Context, offset, limit int) ([]Event, error)
+	ListEvents(ctx context.Context, offset, limit int) ([]Event, error)
 	SaveEvent(ctx context.Context, event Event) error
 }
 
@@ -85,12 +84,6 @@ const (
 	SELECT
 		id, event_id, timestamp, class, zpool
 	FROM events
-	`
-
-	listEventsLimitQuery = `--
-	SELECT
-		id, event_id, timestamp, class, zpool
-	FROM events
 	LIMIT ?, ?
 	`
 
@@ -102,13 +95,8 @@ const (
 )
 
 // ListEvents implements Storage.
-func (s *sqlStorage) ListEvents(ctx context.Context) ([]Event, error) {
-	return queryList(ctx, s, (*Event).scan, listEventsQuery)
-}
-
-// ListEventsOffsetLimit implements Storage.
-func (s *sqlStorage) ListEventsOffsetLimit(ctx context.Context, offset, limit int) ([]Event, error) {
-	return queryList(ctx, s, (*Event).scan, listEventsLimitQuery, offset, limit)
+func (s *sqlStorage) ListEvents(ctx context.Context, offset, limit int) ([]Event, error) {
+	return queryList(ctx, s, (*Event).scan, listEventsQuery, offset, limit)
 }
 
 // SaveEvent implements Storage.

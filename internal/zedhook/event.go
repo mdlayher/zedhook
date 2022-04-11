@@ -15,6 +15,7 @@ package zedhook
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -70,6 +71,25 @@ func (e *Event) scan(s scanner) error {
 
 	e.Timestamp = time.Unix(0, unix)
 	return nil
+}
+
+var _ json.Marshaler = Event{}
+
+// MarshalJSON returns the JSON object for an Event.
+func (e Event) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ID        int    `json:"id"`
+		EventID   int    `json:"event_id"`
+		Timestamp int64  `json:"timestamp"`
+		Class     string `json:"class"`
+		Zpool     string `json:"zpool"`
+	}{
+		ID:        e.ID,
+		EventID:   e.EventID,
+		Timestamp: e.Timestamp.UnixNano(),
+		Class:     e.Class,
+		Zpool:     e.Zpool,
+	})
 }
 
 // A zpoolStatus contains parsed output from zpool status.

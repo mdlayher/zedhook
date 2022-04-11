@@ -92,7 +92,7 @@ func TestClientPush(t *testing.T) {
 
 			// We're done pushing events, so verify that the server parsed our
 			// payload successfully and noted the input zpool.
-			events, err := s.ListEvents(ctx)
+			events, err := s.ListEvents(ctx, 0, 1)
 			if err != nil {
 				t.Fatalf("failed to list events: %v", err)
 			}
