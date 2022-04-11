@@ -86,7 +86,7 @@ func (e Event) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// MarshalJSON returns the JSON object for an Event.
+// UnmarshalJSON unpacks the JSON for an Event.
 func (e *Event) UnmarshalJSON(b []byte) error {
 	var je jsonEvent
 	if err := json.Unmarshal(b, &je); err != nil {
