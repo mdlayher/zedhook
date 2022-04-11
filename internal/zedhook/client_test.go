@@ -54,13 +54,7 @@ func TestClientPush(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			// TODO(mdlayher): factor out ephemeral storage constructor.
-			s, err := zedhook.NewStorage(ctx, ":memory:")
-			if err != nil {
-				t.Fatalf("failed to open storage: %v", err)
-			}
-			defer s.Close()
-
+			s := testStorage(t)
 			c, pC := tt.fn(t, s)
 
 			// Fun fact, mdlayher argued against adding this before using it in
