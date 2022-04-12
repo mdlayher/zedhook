@@ -132,7 +132,7 @@ func TestHandlerEventsErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, pC := testHandler(testStorage(t))
+			handler, pC := testHandler(nil)
 			srv := httptest.NewServer(handler)
 			defer srv.Close()
 
@@ -172,7 +172,7 @@ func TestHandlerEventsOK(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	s := testStorage(t)
+	s := zedhook.MemoryStorage()
 
 	// Save some fake events, update the ID for the one we expect to fetch.
 	want := zedhook.Event{
@@ -222,16 +222,4 @@ func TestHandlerEventsOK(t *testing.T) {
 	if diff := cmp.Diff([]zedhook.Event{want}, body.Events); diff != "" {
 		t.Fatalf("unexpected events (-want +got):\n%s", diff)
 	}
-}
-
-func testStorage(t *testing.T) zedhook.Storage {
-	t.Helper()
-
-	s, err := zedhook.NewStorage(context.Background(), ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open memory storage: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-
-	return s
 }

@@ -39,15 +39,25 @@ type Handler struct {
 	// with the contents of the Payload.
 	OnPayload func(p Payload)
 
-	s   Storage
+	s   *Storage
 	mux http.Handler
 	ll  *log.Logger
 	mm  metrics
 }
 
-// NewHandler constructs an http.Handler for use with the Server. If Storage is
-// nil, no data will be persisted between zedhookd runs.
-func NewHandler(s Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
+// NewHandler constructs an http.Handler for use with the Server. If any of its
+// dependencies are nil, defaults will be used.
+func NewHandler(s *Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
+	if s == nil {
+		s = MemoryStorage()
+	}
+	if ll == nil {
+		ll = log.New(io.Discard, "", 0)
+	}
+	if reg == nil {
+		reg = prometheus.NewPedanticRegistry()
+	}
+
 	h := &Handler{
 		s:  s,
 		ll: ll,
@@ -100,12 +110,10 @@ func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO(mdlayher): consider combining with h.OnPayload.
-	if h.s != nil {
-		if err := h.s.SaveEvent(context.Background(), event); err != nil {
-			h.logf(r, "failed to save client event: %v", err)
-			return
-		}
+	// Don't obey request context: we want to persist the Event.
+	if err := h.s.SaveEvent(context.Background(), event); err != nil {
+		h.logf(r, "failed to save client event: %v", err)
+		return
 	}
 
 	if h.OnPayload != nil {
@@ -236,13 +244,8 @@ func (h *Handler) eventsRequest(w http.ResponseWriter, r *http.Request) (*events
 	}, nil
 }
 
-// logf logs a formatted log for a client request if the Handler logger is not
-// nil.
+// logf logs a formatted log for a client request.
 func (h *Handler) logf(r *http.Request, format string, v ...any) {
-	if h.ll == nil {
-		return
-	}
-
 	h.ll.Printf("%s: %s", r.RemoteAddr, fmt.Sprintf(format, v...))
 }
 

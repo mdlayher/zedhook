@@ -37,7 +37,7 @@ import (
 func TestClientPush(t *testing.T) {
 	tests := []struct {
 		name string
-		fn   func(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload)
+		fn   func(t *testing.T, s *zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload)
 	}{
 		{
 			name: "HTTP",
@@ -54,7 +54,7 @@ func TestClientPush(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			s := testStorage(t)
+			s := zedhook.MemoryStorage()
 			c, pC := tt.fn(t, s)
 
 			// Fun fact, mdlayher argued against adding this before using it in
@@ -156,7 +156,7 @@ func TestClientPushErrorHTTPStatus(t *testing.T) {
 
 // testHTTP creates a Client backed by a TCP HTTP server which returns its
 // payload on a channel.
-func testHTTP(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload) {
+func testHTTP(t *testing.T, s *zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload) {
 	t.Helper()
 
 	handler, pC := testHandler(s)
@@ -173,7 +173,7 @@ func testHTTP(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.
 
 // testUNIX creates a Client backed by a UNIX socket HTTP server which returns
 // its payload on a channel.
-func testUNIX(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload) {
+func testUNIX(t *testing.T, s *zedhook.Storage) (*zedhook.Client, <-chan zedhook.Payload) {
 	t.Helper()
 
 	handler, pC := testHandler(s)
@@ -190,7 +190,7 @@ func testUNIX(t *testing.T, s zedhook.Storage) (*zedhook.Client, <-chan zedhook.
 
 // testHandler creates a http.Handler and Payload channel which sends the
 // contents of the first request once decoded.
-func testHandler(s zedhook.Storage) (http.Handler, <-chan zedhook.Payload) {
+func testHandler(s *zedhook.Storage) (http.Handler, <-chan zedhook.Payload) {
 	pC := make(chan zedhook.Payload, 1)
 
 	// Discard all logs, pass payload to pC.

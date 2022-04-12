@@ -17,31 +17,18 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io"
 
 	_ "modernc.org/sqlite"
 )
 
-// TODO(mdlayher): consider adding a transactional interface to Storage if we
-// need to bulk-insert data.
-
-// Storage is the interface implemented by persistent storage types for
-// zedhookd.
-type Storage interface {
-	io.Closer
-	ListEvents(ctx context.Context, offset, limit int) ([]Event, error)
-	SaveEvent(ctx context.Context, event Event) error
-}
-
-// NewStorage creates a sqlite-backed Storage implementation using the input
-// DSN.
-func NewStorage(ctx context.Context, dsn string) (Storage, error) {
+// NewStorage creates a sqlite-backed persistent storage using the input DSN.
+func NewStorage(ctx context.Context, dsn string) (*Storage, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &sqlStorage{
+	s := &Storage{
 		db: db,
 		semC: func() chan struct{} {
 			// Prepare the semaphore.
@@ -58,16 +45,27 @@ func NewStorage(ctx context.Context, dsn string) (Storage, error) {
 	return s, nil
 }
 
-var _ Storage = (*sqlStorage)(nil)
+// MemoryStorage creates ephemeral sqlite-backed in-memory storage.
+func MemoryStorage() *Storage {
+	// We don't take a caller context to avoid panicking if they cancel it.
+	s, err := NewStorage(context.Background(), ":memory:")
+	if err != nil {
+		// There's no reason this should fail assuming fixed schema setup
+		// queries.
+		panicf("failed to open in-memory storage: %v", err)
+	}
 
-// A sqlStorage is a Storage implementation backed by sqlite3.
-type sqlStorage struct {
+	return s
+}
+
+// Storage is persistent storage backed by sqlite3.
+type Storage struct {
 	db   *sql.DB
 	semC chan struct{}
 }
 
 // Close implements Storage.
-func (s *sqlStorage) Close() error { return s.db.Close() }
+func (s *Storage) Close() error { return s.db.Close() }
 
 // Queries used by sqlStorage.
 const (
@@ -94,13 +92,19 @@ const (
 	`
 )
 
-// ListEvents implements Storage.
-func (s *sqlStorage) ListEvents(ctx context.Context, offset, limit int) ([]Event, error) {
+// ListEvents lists Events from the database given an offset and limit value.
+// If limit is 0, a default value is used.
+func (s *Storage) ListEvents(ctx context.Context, offset, limit int) ([]Event, error) {
+	// By default, set a reasonable non-zero limit.
+	if limit == 0 {
+		limit = 1000
+	}
+
 	return queryList(ctx, s, (*Event).scan, listEventsQuery, offset, limit)
 }
 
-// SaveEvent implements Storage.
-func (s *sqlStorage) SaveEvent(ctx context.Context, e Event) error {
+// SaveEvent saves an Event in the database.
+func (s *Storage) SaveEvent(ctx context.Context, e Event) error {
 	// Notably this does not run within a transaction: we ran into SQLITE_BUSY
 	// problems before and there's no real need to open a transaction for a
 	// single write to begin with. Instead acquire and release a semaphore to
@@ -128,8 +132,8 @@ func (s *sqlStorage) SaveEvent(ctx context.Context, e Event) error {
 	return err
 }
 
-// setup creates the schema for sqlStorage.
-func (s *sqlStorage) setup(ctx context.Context) error {
+// setup creates the schema for Storage.
+func (s *Storage) setup(ctx context.Context) error {
 	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, createEventsSchemaQuery)
 		return err
@@ -138,7 +142,7 @@ func (s *sqlStorage) setup(ctx context.Context) error {
 
 // withTx begins a transaction and executes it within fn, either committing or
 // rolling back the transaction depending on the return value of fn.
-func (s *sqlStorage) withTx(
+func (s *Storage) withTx(
 	ctx context.Context,
 	fn func(ctx context.Context, tx *sql.Tx) error,
 ) error {
@@ -171,7 +175,7 @@ type scanner interface {
 // itself.
 func queryList[T any](
 	ctx context.Context,
-	s *sqlStorage,
+	s *Storage,
 	// A method expression which allows *T to scan data into itself.
 	scan func(t *T, s scanner) error,
 	// The query to perform and any associated prepared arguments.
