@@ -134,7 +134,7 @@ func (h *Handler) pushRequest(w http.ResponseWriter, r *http.Request) (*pushRequ
 	w.Header().Set("Connection", "close")
 
 	if r.Method != http.MethodPost {
-		return nil, h.errorf(
+		return nil, h.pushErrorf(
 			w, r,
 			http.StatusMethodNotAllowed,
 			"method not allowed: %q", r.Method,
@@ -142,7 +142,7 @@ func (h *Handler) pushRequest(w http.ResponseWriter, r *http.Request) (*pushRequ
 	}
 
 	if ct := r.Header.Get("Content-Type"); ct != contentJSON {
-		return nil, h.errorf(
+		return nil, h.pushErrorf(
 			w, r,
 			http.StatusBadRequest,
 			"bad request content type: %q", ct,
@@ -151,7 +151,7 @@ func (h *Handler) pushRequest(w http.ResponseWriter, r *http.Request) (*pushRequ
 
 	var p Payload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		return nil, h.errorf(
+		return nil, h.pushErrorf(
 			w, r,
 			http.StatusBadRequest,
 			"bad request payload: %v", err,
@@ -171,6 +171,20 @@ func (h *Handler) pushRequest(w http.ResponseWriter, r *http.Request) (*pushRequ
 		Local:   local,
 		Creds:   creds,
 	}, true
+}
+
+// pushErrorf writes a formatted error to the client and to the Handler's
+// logger. It always returns "false" for use in h.pushRequest.
+func (h *Handler) pushErrorf(
+	w http.ResponseWriter, r *http.Request,
+	status int,
+	format string, v ...any,
+) bool {
+	text := fmt.Sprintf(format, v...)
+
+	h.logf(r, text)
+	http.Error(w, text, status)
+	return false
 }
 
 // events implements GET /events.
@@ -220,20 +234,6 @@ func (h *Handler) eventsRequest(w http.ResponseWriter, r *http.Request) (*events
 		Events: events,
 		Page:   p,
 	}, nil
-}
-
-// errorf writes a formatted error to the client and to the Handler's logger.
-// It always returns "nil, false" for use in h.pushRequest.
-func (h *Handler) errorf(
-	w http.ResponseWriter, r *http.Request,
-	status int,
-	format string, v ...any,
-) bool {
-	text := fmt.Sprintf(format, v...)
-
-	h.logf(r, text)
-	http.Error(w, text, status)
-	return false
 }
 
 // logf logs a formatted log for a client request if the Handler logger is not
