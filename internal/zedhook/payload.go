@@ -150,14 +150,10 @@ func makePayload(ctx context.Context, envs []string, status execFunc) (Payload, 
 			// Keep for later use, but also add a variable.
 			zpool.pool = v
 		case "ZEVENT_CLASS":
-			// Only issue zpool status in response to certain events. It's
-			// wasteful and unnecessary for many zpool events.
-			//
-			// TODO(mdlayher): read the documentation and figure out which make
-			// sense to add.
-			zpool.status = false ||
-				v == "sysevent.fs.zfs.resilver_finish" ||
-				v == "sysevent.fs.zfs.scrub_finish"
+			// Only issue zpool status in response to certain events. Based on
+			// mdlayher's pool, history events occur very often due to zfs recv
+			// via zrepl. Skip these in favor of less frequent events.
+			zpool.status = v != "sysevent.fs.zfs.history_event"
 		case "",
 			// Variables ZED sends that we want to ignore.
 			//
