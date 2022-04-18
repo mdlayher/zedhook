@@ -22,9 +22,13 @@ import (
 
 // An Event is the processed version of a client Payload.
 type Event struct {
+	// Core metadata about an Event.
 	ID, EventID  int
 	Timestamp    time.Time
 	Class, Zpool string
+
+	// Unprocessed variables associated with the Event.
+	Variables []Variable
 }
 
 // parseEvent processes a raw Payload into an Event.
@@ -50,6 +54,9 @@ func parseEvent(p Payload) (Event, error) {
 			sec, err = strconv.ParseInt(v.Value, 10, 64)
 		case "ZEVENT_TIME_NSECS":
 			nsec, err = strconv.ParseInt(v.Value, 10, 64)
+		default:
+			// Unprocessed, add to the Event as-is.
+			e.Variables = append(e.Variables, v)
 		}
 		if err != nil {
 			return Event{}, fmt.Errorf("failed to parse %q=%q: %v", v.Key, v.Value, err)
@@ -81,6 +88,7 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		Timestamp: e.Timestamp.UnixNano(),
 		Class:     e.Class,
 		Zpool:     e.Zpool,
+		Variables: e.Variables,
 	})
 }
 
@@ -97,6 +105,7 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 		Timestamp: time.Unix(0, je.Timestamp),
 		Class:     je.Class,
 		Zpool:     je.Zpool,
+		Variables: je.Variables,
 	}
 
 	return nil
@@ -104,9 +113,19 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 
 // A jsonEvent is the JSON body for an Event.
 type jsonEvent struct {
-	ID        int    `json:"id"`
-	EventID   int    `json:"event_id"`
-	Timestamp int64  `json:"timestamp"`
-	Class     string `json:"class"`
-	Zpool     string `json:"zpool"`
+	ID        int        `json:"id"`
+	EventID   int        `json:"event_id"`
+	Timestamp int64      `json:"timestamp"`
+	Class     string     `json:"class"`
+	Zpool     string     `json:"zpool"`
+	Variables []Variable `json:"variables"`
 }
+
+// A Variable is a key/value pair for an environment variable passed by ZED.
+type Variable struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// scan uses the scanner to populate a Variable.
+func (v *Variable) scan(s scanner) error { return s.Scan(&v.Key, &v.Value) }

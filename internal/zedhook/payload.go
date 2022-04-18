@@ -53,12 +53,6 @@ type ZpoolPayload struct {
 	RawStatus string `json:"raw_status"`
 }
 
-// A Variable is a key/value pair for an environment variable passed by ZED.
-type Variable struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
-
 // Version returns the Version value embedded in this Payload.
 func (p Payload) Version() Version { return p.version }
 

@@ -15,7 +15,9 @@ package zedhook
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -24,6 +26,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/mdlayher/metricslite"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -64,14 +67,16 @@ func NewHandler(s *Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
 		mm: newMetrics(metricslite.NewPrometheus(reg)),
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/push", h.push)
-	mux.HandleFunc("/events", h.events)
-	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+	r := mux.NewRouter()
+	r.HandleFunc("/push", h.push)
+	r.HandleFunc("/events", h.listEvents)
+	r.HandleFunc("/events/", h.listEvents)
+	r.HandleFunc("/events/{id}", h.getEvent)
+	r.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{
 		ErrorLog: ll,
 	}))
 
-	h.mux = mux
+	h.mux = r
 	return h
 }
 
@@ -195,17 +200,19 @@ func (h *Handler) pushErrorf(
 	return false
 }
 
-// events implements GET /events.
-func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
+// listEvents implements GET /events.
+func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentJSON)
 
 	var body responseBody
-	er, err := h.eventsRequest(w, r)
-	if err != nil {
-		h.logf(r, "failed to send events: %v", err)
+	if er, err := h.eventsRequest(w, r); err != nil {
+		h.logf(r, "failed to list events: %v", err)
 		body = errorBody(err)
 	} else {
-		body = okBody(er.Page, er.Events)
+		body = responseBody{
+			Metadata: &responseMetadata{Page: er.Page},
+			Events:   er.Events,
+		}
 	}
 
 	_ = json.NewEncoder(w).Encode(body)
@@ -235,13 +242,57 @@ func (h *Handler) eventsRequest(w http.ResponseWriter, r *http.Request) (*events
 	events, err := h.s.ListEvents(r.Context(), p.Offset, p.Limit)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		return nil, fmt.Errorf("failed to list events: %v", err)
+		return nil, fmt.Errorf("failed to list events from database: %v", err)
 	}
 
 	return &eventsRequest{
 		Events: events,
 		Page:   p,
 	}, nil
+}
+
+// getEvent implements GET /events/{id}.
+func (h *Handler) getEvent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", contentJSON)
+
+	var body responseBody
+	if e, err := h.getEventRequest(w, r); err != nil {
+		h.logf(r, "failed to get event: %v", err)
+		body = errorBody(err)
+	} else {
+		body = responseBody{Event: &e}
+	}
+
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// getEventRequest is a middleware which returns a valid Event or an HTTP status
+// error to the client.
+func (h *Handler) getEventRequest(w http.ResponseWriter, r *http.Request) (Event, error) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return Event{}, fmt.Errorf("method not allowed: %q", r.Method)
+	}
+
+	id, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return Event{}, fmt.Errorf("invalid event ID: %v", err)
+	}
+
+	e, err := h.s.GetEvent(r.Context(), id)
+	if err != nil {
+		// Specific handling for 404.
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusNotFound)
+			return Event{}, errors.New("event not found for requested ID")
+		}
+
+		w.WriteHeader(http.StatusInternalServerError)
+		return Event{}, fmt.Errorf("failed to get event from database: %v", err)
+	}
+
+	return e, nil
 }
 
 // logf logs a formatted log for a client request.
@@ -253,7 +304,12 @@ func (h *Handler) logf(r *http.Request, format string, v ...any) {
 type responseBody struct {
 	Error    *responseError    `json:"error"`
 	Metadata *responseMetadata `json:"metadata,omitempty"`
-	Events   []Event           `json:"events,omitempty"`
+
+	// GET /events
+	Events []Event `json:"events,omitempty"`
+
+	// GET /events/id
+	Event *Event `json:"event,omitempty"`
 }
 
 // responseMetadata contains metadata for the client about an HTTP response.
@@ -270,14 +326,6 @@ type responseError struct {
 type page struct {
 	Offset int `json:"offset"`
 	Limit  int `json:"limit"`
-}
-
-// okBody returns a responseBody with events and associated metadata.
-func okBody(page page, events []Event) responseBody {
-	return responseBody{
-		Metadata: &responseMetadata{Page: page},
-		Events:   events,
-	}
 }
 
 // errorBody returns a responseBody with the input error.

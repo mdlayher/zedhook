@@ -16,6 +16,7 @@ package zedhook
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	_ "modernc.org/sqlite"
@@ -78,18 +79,49 @@ const (
 		zpool     TEXT NOT NULL
 	);`
 
+	createVariablesSchemaQuery = `--
+	CREATE TABLE IF NOT EXISTS variables (
+		id             INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_id       INTEGER NOT NULL,
+		event_event_id INTEGER NOT NULL,
+		key            TEXT NOT NULL,
+		value          TEXT NOT NULL,
+		UNIQUE(id, event_id),
+		FOREIGN KEY(event_id, event_event_id) REFERENCES events(id, event_id)
+	);`
+
 	listEventsQuery = `--
 	SELECT
 		id, event_id, timestamp, class, zpool
 	FROM events
-	LIMIT ?, ?
-	`
+	LIMIT ?, ?;`
+
+	getEventByIDQuery = `--
+	SELECT
+		id, event_id, timestamp, class, zpool
+	FROM events
+	WHERE id = ?
+	LIMIT 1;`
+
+	getEventVariablesByIDQuery = `--
+	SELECT
+		v.key, v.value
+	FROM events e
+	JOIN variables v
+	ON
+		e.id = v.event_id
+		AND e.event_id = v.event_event_id
+	WHERE e.id = ?;`
 
 	saveEventQuery = `--
 	INSERT INTO events (
 		event_id, timestamp, class, zpool
-	) VALUES (?, ?, ?, ?);
-	`
+	) VALUES (?, ?, ?, ?);`
+
+	saveVariableQuery = `--
+	INSERT INTO variables (
+		event_id, event_event_id, key, value
+	) VALUES (?, ?, ?, ?);`
 )
 
 // ListEvents lists Events from the database given an offset and limit value.
@@ -103,12 +135,41 @@ func (s *Storage) ListEvents(ctx context.Context, offset, limit int) ([]Event, e
 	return queryList(ctx, s, (*Event).scan, listEventsQuery, offset, limit)
 }
 
+// GetEvent gets an Event and its associated variables by ID from the database.
+func (s *Storage) GetEvent(ctx context.Context, id int) (Event, error) {
+	var e Event
+	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := e.scan(tx.QueryRowContext(ctx, getEventByIDQuery, id)); err != nil {
+			// Wrap: may return sql.ErrNoRows.
+			return fmt.Errorf("failed to get event: %w", err)
+		}
+
+		// Now gather the variables for that event.
+		vars, err := queryListTx(
+			ctx,
+			tx,
+			(*Variable).scan,
+			getEventVariablesByIDQuery,
+			e.ID,
+		)
+		if err != nil {
+			return err
+		}
+
+		e.Variables = vars
+		return nil
+	})
+	if err != nil {
+		return Event{}, err
+	}
+
+	return e, nil
+}
+
 // SaveEvent saves an Event in the database.
 func (s *Storage) SaveEvent(ctx context.Context, e Event) error {
-	// Notably this does not run within a transaction: we ran into SQLITE_BUSY
-	// problems before and there's no real need to open a transaction for a
-	// single write to begin with. Instead acquire and release a semaphore to
-	// gate individual writes.
+	// We ran into SQLITE_BUSY issues before, so acquire and release a semaphore
+	// to gate individual writes.
 	//
 	// TODO(mdlayher): this resolves busy locking but ultimately we should
 	// consider moving to a batching/flushing model within a longer running
@@ -121,22 +182,59 @@ func (s *Storage) SaveEvent(ctx context.Context, e Event) error {
 		defer func() { s.semC <- struct{}{} }()
 	}
 
-	_, err := s.db.ExecContext(
-		ctx,
-		saveEventQuery,
-		e.EventID,
-		e.Timestamp.UnixNano(),
-		e.Class,
-		e.Zpool,
-	)
-	return err
+	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		// First save the Event.
+		res, err := tx.ExecContext(
+			ctx,
+			saveEventQuery,
+			e.EventID,
+			e.Timestamp.UnixNano(),
+			e.Class,
+			e.Zpool,
+		)
+		if err != nil {
+			return err
+		}
+
+		// Then retrieve the Event's ID, which is then used to store all of the
+		// raw variables for this Event.
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		e.ID = int(id)
+
+		for _, v := range e.Variables {
+			_, err := tx.ExecContext(
+				ctx,
+				saveVariableQuery,
+				e.ID,
+				e.EventID,
+				v.Key,
+				v.Value,
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 // setup creates the schema for Storage.
 func (s *Storage) setup(ctx context.Context) error {
 	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, createEventsSchemaQuery)
-		return err
+		for _, q := range []string{
+			createEventsSchemaQuery,
+			createVariablesSchemaQuery,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 }
 
@@ -152,6 +250,11 @@ func (s *Storage) withTx(
 	}
 
 	if err := fn(ctx, tx); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Return as-is with no wrapping, and don't bother doing a rollback.
+			return err
+		}
+
 		if rerr := tx.Rollback(); err != nil {
 			return fmt.Errorf("failed to rollback transaction: %v, err: %v", rerr, err)
 		}
@@ -184,27 +287,49 @@ func queryList[T any](
 ) ([]T, error) {
 	var ts []T
 	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, query, args...)
+		tmp, err := queryListTx(ctx, tx, scan, query, args...)
 		if err != nil {
-			return fmt.Errorf("failed to query for %T: %v", ts, err)
+			return err
 		}
 
-		for rows.Next() {
-			var t T
-			if err := scan(&t, rows); err != nil {
-				return fmt.Errorf("failed to scan for %T: %v", t, err)
-			}
-			ts = append(ts, t)
-		}
-
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("failed to iterate rows for %T: %v", ts, err)
-		}
-
+		ts = tmp
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	return ts, nil
+}
+
+// queryListTx produces []T from a type which has a method that can scan rows
+// into itself, within the context of an existing transaction.
+func queryListTx[T any](
+	ctx context.Context,
+	tx *sql.Tx,
+	// A method expression which allows *T to scan data into itself.
+	scan func(t *T, s scanner) error,
+	// The query to perform and any associated prepared arguments.
+	query string,
+	args ...any,
+) ([]T, error) {
+	var ts []T
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query for %T: %v", ts, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var t T
+		if err := scan(&t, rows); err != nil {
+			return nil, fmt.Errorf("failed to scan for %T: %v", t, err)
+		}
+		ts = append(ts, t)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate rows for %T: %v", ts, err)
 	}
 
 	return ts, nil

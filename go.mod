@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/google/go-cmp v0.5.7
+	github.com/gorilla/mux v1.8.0
 	github.com/mdlayher/metricslite v0.0.0-20220406114248-d75c70dd4887
 	github.com/mdlayher/netx v0.0.0-20200512211805-669a06fde734
 	github.com/pelletier/go-toml v1.9.4
