@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -30,11 +31,14 @@ import (
 )
 
 func main() {
+	dbFlag := flag.String("d", "zedhookd.db", "path to zedhookd's sqlite3 database")
+	flag.Parse()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	// TODO(mdlayher): make configurable.
-	s, err := zedhook.NewStorage(ctx, "zedhookd.db")
+	s, err := zedhook.NewStorage(ctx, *dbFlag)
 	if err != nil {
 		log.Fatalf("failed to open storage: %v", err)
 	}
