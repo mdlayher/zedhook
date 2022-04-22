@@ -50,7 +50,7 @@ type Payload struct {
 // A ZpoolPayload contains information from executing a zpool command.
 type ZpoolPayload struct {
 	// The raw output of 'zpool status tank'.
-	RawStatus string `json:"raw_status"`
+	RawStatus []byte `json:"raw_status"`
 }
 
 // Version returns the Version value embedded in this Payload.
@@ -175,7 +175,7 @@ func makePayload(ctx context.Context, envs []string, status execFunc) (Payload, 
 			return Payload{}, fmt.Errorf("failed to exec: zpool status %s: %v", zpool.pool, err)
 		}
 
-		p.Zpool = &ZpoolPayload{RawStatus: string(out)}
+		p.Zpool = &ZpoolPayload{RawStatus: out}
 	}
 
 	return p, nil

@@ -110,7 +110,7 @@ func Test_makePayload(t *testing.T) {
 					{Key: "ZEVENT_CLASS", Value: "sysevent.fs.zfs.scrub_finish"},
 					{Key: "ZEVENT_POOL", Value: "tank"},
 				},
-				Zpool: &ZpoolPayload{RawStatus: statusSimple},
+				Zpool: &ZpoolPayload{RawStatus: []byte(statusSimple)},
 			},
 		},
 	}

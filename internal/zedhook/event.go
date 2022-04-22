@@ -29,6 +29,9 @@ type Event struct {
 
 	// Unprocessed variables associated with the Event.
 	Variables []Variable
+
+	// Optional zpool status output logged with the Event.
+	Status *Status
 }
 
 // parseEvent processes a raw Payload into an Event.
@@ -63,6 +66,11 @@ func parseEvent(p Payload) (Event, error) {
 		}
 	}
 
+	if p.Zpool != nil {
+		// ID set on database insert later.
+		e.Status = &Status{Status: p.Zpool.RawStatus}
+	}
+
 	e.Timestamp = time.Unix(sec, nsec)
 	return e, nil
 }
@@ -89,6 +97,7 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		Class:     e.Class,
 		Zpool:     e.Zpool,
 		Variables: e.Variables,
+		Status:    e.Status,
 	})
 }
 
@@ -106,6 +115,7 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 		Class:     je.Class,
 		Zpool:     je.Zpool,
 		Variables: je.Variables,
+		Status:    je.Status,
 	}
 
 	return nil
@@ -113,13 +123,27 @@ func (e *Event) UnmarshalJSON(b []byte) error {
 
 // A jsonEvent is the JSON body for an Event.
 type jsonEvent struct {
-	ID        int        `json:"id"`
-	EventID   int        `json:"event_id"`
-	Timestamp int64      `json:"timestamp"`
-	Class     string     `json:"class"`
-	Zpool     string     `json:"zpool"`
-	Variables []Variable `json:"variables"`
+	ID        int    `json:"id"`
+	EventID   int    `json:"event_id"`
+	Timestamp int64  `json:"timestamp"`
+	Class     string `json:"class"`
+	Zpool     string `json:"zpool"`
+
+	// Optional: correponds to variables for a single event.
+	Variables []Variable `json:"variables,omitempty"`
+
+	// Optional: corresponds to status table entry if non-zero.
+	Status *Status `json:"status_id,omitempty"`
 }
+
+// A Status is a raw zpool status output.
+type Status struct {
+	ID     int
+	Status []byte
+}
+
+// scan uses the scanner to populate a Status.
+func (s *Status) scan(sc scanner) error { return sc.Scan(&s.ID, &s.Status) }
 
 // A Variable is a key/value pair for an environment variable passed by ZED.
 type Variable struct {

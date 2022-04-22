@@ -90,6 +90,14 @@ const (
 		FOREIGN KEY(event_id, event_event_id) REFERENCES events(id, event_id)
 	);`
 
+	createStatusSchemaQuery = `--
+	CREATE TABLE IF NOT EXISTS status (
+		id       INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_id INTEGER NOT NULL,
+		status   BLOB NOT NULL,
+		FOREIGN KEY(event_id) REFERENCES events(id)
+	);`
+
 	listEventsQuery = `--
 	SELECT
 		id, event_id, timestamp, class, zpool
@@ -102,6 +110,14 @@ const (
 	FROM events
 	WHERE id = ?
 	LIMIT 1;`
+
+	getEventStatusByIDQuery = `--
+	SELECT
+		s.id, s.status
+	FROM events e
+	JOIN status s
+	ON e.id = s.event_id
+	WHERE e.id = ?;`
 
 	getEventVariablesByIDQuery = `--
 	SELECT
@@ -117,6 +133,11 @@ const (
 	INSERT INTO events (
 		event_id, timestamp, class, zpool
 	) VALUES (?, ?, ?, ?);`
+
+	saveStatusQuery = `--
+	INSERT INTO status (
+		event_id, status
+	) VALUES (?, ?);`
 
 	saveVariableQuery = `--
 	INSERT INTO variables (
@@ -135,7 +156,7 @@ func (s *Storage) ListEvents(ctx context.Context, offset, limit int) ([]Event, e
 	return queryList(ctx, s, (*Event).scan, listEventsQuery, offset, limit)
 }
 
-// GetEvent gets an Event and its associated variables by ID from the database.
+// GetEvent gets an Event and its associated data by ID from the database.
 func (s *Storage) GetEvent(ctx context.Context, id int) (Event, error) {
 	var e Event
 	err := s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -144,7 +165,16 @@ func (s *Storage) GetEvent(ctx context.Context, id int) (Event, error) {
 			return fmt.Errorf("failed to get event: %w", err)
 		}
 
-		// Now gather the variables for that event.
+		// Now gather associated data if present.
+		var st Status
+		err := st.scan(tx.QueryRowContext(ctx, getEventStatusByIDQuery, id))
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if st.ID != 0 {
+			e.Status = &st
+		}
+
 		vars, err := queryListTx(
 			ctx,
 			tx,
@@ -152,7 +182,7 @@ func (s *Storage) GetEvent(ctx context.Context, id int) (Event, error) {
 			getEventVariablesByIDQuery,
 			e.ID,
 		)
-		if err != nil {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 
@@ -196,13 +226,25 @@ func (s *Storage) SaveEvent(ctx context.Context, e Event) error {
 			return err
 		}
 
-		// Then retrieve the Event's ID, which is then used to store all of the
-		// raw variables for this Event.
+		// Then retrieve the Event's ID, which is then used to store associated
+		// data for this event.
 		id, err := res.LastInsertId()
 		if err != nil {
 			return err
 		}
 		e.ID = int(id)
+
+		if e.Status != nil {
+			_, err := tx.ExecContext(
+				ctx,
+				saveStatusQuery,
+				e.ID,
+				e.Status.Status,
+			)
+			if err != nil {
+				return err
+			}
+		}
 
 		for _, v := range e.Variables {
 			_, err := tx.ExecContext(
@@ -227,6 +269,7 @@ func (s *Storage) setup(ctx context.Context) error {
 	return s.withTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		for _, q := range []string{
 			createEventsSchemaQuery,
+			createStatusSchemaQuery,
 			createVariablesSchemaQuery,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {

@@ -300,6 +300,7 @@ func TestHandlerGetEventOK(t *testing.T) {
 
 	// Save some fake events, update the ID for the one we expect to fetch.
 	want := zedhook.Event{
+		ID:        2,
 		EventID:   1,
 		Timestamp: time.Unix(1, 0),
 		Zpool:     "tank",
@@ -307,6 +308,10 @@ func TestHandlerGetEventOK(t *testing.T) {
 			Key:   "KEY",
 			Value: "VALUE",
 		}},
+		Status: &zedhook.Status{
+			ID:     1,
+			Status: []byte("hello world"),
+		},
 	}
 
 	if err := s.SaveEvent(ctx, zedhook.Event{EventID: 404}); err != nil {
@@ -315,7 +320,6 @@ func TestHandlerGetEventOK(t *testing.T) {
 	if err := s.SaveEvent(ctx, want); err != nil {
 		t.Fatalf("failed to save second event: %v", err)
 	}
-	want.ID = 2
 
 	handler, pC := testHandler(s)
 	srv := httptest.NewServer(handler)
