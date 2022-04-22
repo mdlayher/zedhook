@@ -68,21 +68,47 @@ type Storage struct {
 // Close implements Storage.
 func (s *Storage) Close() error { return s.db.Close() }
 
-// ListEvents lists Events from the database given an offset and limit value.
-// If limit is 0, a default value is used.
-func (s *Storage) ListEvents(ctx context.Context, offset, limit int) ([]Event, error) {
-	// By default, set a reasonable non-zero limit.
-	if limit == 0 {
-		limit = 1000
-	}
+// ListEventsOptions provides arguments for the Storage.ListEvents method.
+type ListEventsOptions struct {
+	Zpool, Class  string
+	Offset, Limit int
+}
 
-	const query = `--
+// query produces the query string and arguments from o.
+func (o ListEventsOptions) query() (string, []any) {
+	// Construct a query based on the options set.
+	//
+	// TODO(mdlayher): if this becomes much more convoluted, it may be smart to
+	// bring in a query builder package.
+	var (
+		query = `--
 SELECT
 	id, event_id, timestamp, class, zpool
-FROM events
-LIMIT ?, ?;`
+FROM events`
+		args []any
+	)
 
-	return queryList(ctx, s, (*Event).scan, query, offset, limit)
+	switch {
+	case o.Zpool != "" && o.Class != "":
+		query += "\nWHERE zpool = ? AND class = ?"
+		args = append(args, o.Zpool, o.Class)
+	case o.Zpool != "":
+		query += "\nWHERE zpool = ?"
+		args = append(args, o.Zpool)
+	case o.Class != "":
+		query += "\nWHERE class = ?"
+		args = append(args, o.Class)
+	}
+
+	query += "\nLIMIT ?, ?;"
+	args = append(args, o.Offset, o.Limit)
+	return query, args
+}
+
+// ListEvents lists Events from the database given a set of options.
+func (s *Storage) ListEvents(ctx context.Context, o ListEventsOptions) ([]Event, error) {
+	query, args := o.query()
+	return queryList(ctx, s, (*Event).scan, query, args...)
 }
 
 // GetEvent gets an Event and its associated data by ID from the database.

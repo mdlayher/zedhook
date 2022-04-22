@@ -233,13 +233,19 @@ func (h *Handler) eventsRequest(w http.ResponseWriter, r *http.Request) (*events
 		return nil, fmt.Errorf("method not allowed: %q", r.Method)
 	}
 
-	p, err := queryPage(r.URL.Query())
+	q := r.URL.Query()
+	p, err := queryPage(q)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return nil, fmt.Errorf("invalid pagination request parameters: %v", err)
 	}
 
-	events, err := h.s.ListEvents(r.Context(), p.Offset, p.Limit)
+	events, err := h.s.ListEvents(r.Context(), ListEventsOptions{
+		Zpool:  q.Get("zpool"),
+		Class:  q.Get("class"),
+		Offset: p.Offset,
+		Limit:  p.Limit,
+	})
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return nil, fmt.Errorf("failed to list events from database: %v", err)

@@ -175,10 +175,12 @@ func TestHandlerListEventsOK(t *testing.T) {
 
 	s := zedhook.MemoryStorage()
 
-	// Save some fake events, update the ID for the one we expect to fetch.
+	// Save some fake events, though we only ever fetch the "want" event.
 	want := zedhook.Event{
+		ID:        2,
 		EventID:   1,
 		Timestamp: time.Unix(1, 0),
+		Class:     "sysevent.fs.zfs.scrub_start",
 		Zpool:     "tank",
 	}
 
@@ -188,40 +190,30 @@ func TestHandlerListEventsOK(t *testing.T) {
 	if err := s.SaveEvent(ctx, want); err != nil {
 		t.Fatalf("failed to save second event: %v", err)
 	}
-	want.ID = 2
 
 	handler, pC := testHandler(s)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 
-	// Fetch a single event.
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/events?offset=1&limit=1", nil)
-	if err != nil {
-		t.Fatalf("failed to create HTTP request: %v", err)
-	}
+	for _, a := range []string{
+		"offset=1",
+		"offset=1&limit=1",
+		fmt.Sprintf("zpool=%s", want.Zpool),
+		fmt.Sprintf("class=%s", want.Class),
+		fmt.Sprintf("zpool=%s&class=%s", want.Zpool, want.Class),
+	} {
+		t.Run(a, func(t *testing.T) {
+			got := httpGet(t, fmt.Sprintf("%s/events?%s", srv.URL, a))
+			if diff := cmp.Diff(want, got[0]); diff != "" {
+				t.Fatalf("unexpected events (-want +got):\n%s", diff)
+			}
 
-	res, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
-	if err != nil {
-		t.Fatalf("failed to perform HTTP request: %v", err)
-	}
-	defer res.Body.Close()
-
-	// All requests should return non-204 and no payload.
-	if len(pC) > 0 {
-		p := <-pC
-		t.Fatalf("expected empty payload channel, but got: %+v", p)
-	}
-
-	// Decode and verify the event.
-	var body struct {
-		Events []zedhook.Event `json:"events"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-		t.Fatalf("failed to decode events: %v", err)
-	}
-
-	if diff := cmp.Diff([]zedhook.Event{want}, body.Events); diff != "" {
-		t.Fatalf("unexpected events (-want +got):\n%s", diff)
+			// All requests should return non-204 and no payload.
+			if len(pC) > 0 {
+				p := <-pC
+				t.Fatalf("expected empty payload channel, but got: %+v", p)
+			}
+		})
 	}
 }
 
@@ -358,4 +350,34 @@ func TestHandlerGetEventOK(t *testing.T) {
 	if diff := cmp.Diff(want, body.Event); diff != "" {
 		t.Fatalf("unexpected event (-want +got):\n%s", diff)
 	}
+}
+
+func httpGet(t *testing.T, addr string) []zedhook.Event {
+	t.Helper()
+
+	// Fetch a single event.
+	req, err := http.NewRequest(
+		http.MethodGet,
+		addr,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("failed to create HTTP request: %v", err)
+	}
+
+	res, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("failed to perform HTTP request: %v", err)
+	}
+	defer res.Body.Close()
+
+	// Decode and verify the event.
+	var body struct {
+		Events []zedhook.Event `json:"events"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode event: %v", err)
+	}
+
+	return body.Events
 }
