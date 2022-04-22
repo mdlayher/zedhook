@@ -109,8 +109,8 @@ SELECT
 FROM events e
 JOIN variables v
 ON
-	e.id = v.event_id
-	AND e.event_id = v.event_event_id
+	e.id = v.zedhook_event_id
+	AND e.event_id = v.zfs_event_id
 WHERE e.id = ?;`
 	)
 
@@ -167,7 +167,7 @@ INSERT INTO status (
 
 		saveVariables = `--
 INSERT INTO variables (
-	event_id, event_event_id, key, value
+	zedhook_event_id, zfs_event_id, key, value
 ) VALUES (?, ?, ?, ?);`
 	)
 
@@ -259,13 +259,13 @@ CREATE TABLE IF NOT EXISTS status (
 
 		createVariables = `--
 CREATE TABLE IF NOT EXISTS variables (
-	id             INTEGER PRIMARY KEY AUTOINCREMENT,
-	event_id       INTEGER NOT NULL,
-	event_event_id INTEGER NOT NULL,
-	key            TEXT NOT NULL,
-	value          TEXT NOT NULL,
-	UNIQUE(id, event_id),
-	FOREIGN KEY(event_id, event_event_id) REFERENCES events(id, event_id)
+	id               INTEGER PRIMARY KEY AUTOINCREMENT,
+	zedhook_event_id INTEGER NOT NULL,
+	zfs_event_id     INTEGER NOT NULL,
+	key              TEXT NOT NULL,
+	value            TEXT NOT NULL,
+	UNIQUE(id, zedhook_event_id),
+	FOREIGN KEY(zedhook_event_id, zfs_event_id) REFERENCES events(id, event_id)
 );`
 	)
 
