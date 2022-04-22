@@ -133,13 +133,13 @@ type jsonEvent struct {
 	Variables []Variable `json:"variables,omitempty"`
 
 	// Optional: corresponds to status table entry if non-zero.
-	Status *Status `json:"status_id,omitempty"`
+	Status *Status `json:"status,omitempty"`
 }
 
 // A Status is a raw zpool status output.
 type Status struct {
-	ID     int
-	Status []byte
+	ID     int    `json:"id"`
+	Status []byte `json:"status"`
 }
 
 // scan uses the scanner to populate a Status.
