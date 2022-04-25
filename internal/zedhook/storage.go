@@ -18,6 +18,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -76,31 +77,33 @@ type ListEventsOptions struct {
 
 // query produces the query string and arguments from o.
 func (o ListEventsOptions) query() (string, []any) {
-	// Construct a query based on the options set.
-	//
-	// TODO(mdlayher): if this becomes much more convoluted, it may be smart to
-	// bring in a query builder package.
+	// Construct a query based on the options set. Each non-empty string option
+	// results in a new WHERE clause.
 	var (
-		query = `--
-SELECT
-	id, event_id, timestamp, class, zpool
-FROM events`
-		args []any
+		where []string
+		args  []any
 	)
 
-	switch {
-	case o.Zpool != "" && o.Class != "":
-		query += "\nWHERE zpool = ? AND class = ?"
-		args = append(args, o.Zpool, o.Class)
-	case o.Zpool != "":
-		query += "\nWHERE zpool = ?"
+	if o.Zpool != "" {
+		where = append(where, "zpool = ? ")
 		args = append(args, o.Zpool)
-	case o.Class != "":
-		query += "\nWHERE class = ?"
+	}
+	if o.Class != "" {
+		where = append(where, "class = ? ")
 		args = append(args, o.Class)
 	}
 
-	query += "\nLIMIT ?, ?;"
+	query := `--
+SELECT
+	id, event_id, timestamp, class, zpool
+FROM events
+`
+
+	if len(where) > 0 {
+		query += fmt.Sprintf("WHERE %s\n", strings.Join(where, "AND "))
+	}
+
+	query += "LIMIT ?, ?;"
 	args = append(args, o.Offset, o.Limit)
 	return query, args
 }
