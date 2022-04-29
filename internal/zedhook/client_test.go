@@ -196,10 +196,23 @@ func testHandler(s *zedhook.Storage) (http.Handler, <-chan zedhook.Payload) {
 	pC := make(chan zedhook.Payload, 1)
 
 	// Discard all logs, pass payload to pC.
-	h := zedhook.NewHandler(s, log.New(io.Discard, "", 0), prometheus.NewPedanticRegistry())
+	h, err := zedhook.NewHandler(
+		context.Background(),
+		s,
+		log.New(io.Discard, "", 0),
+		prometheus.NewPedanticRegistry(),
+	)
+	if err != nil {
+		panicf("failed to create handler: %v", err)
+	}
+
 	h.OnPayload = func(p zedhook.Payload) { pC <- p }
 
 	return h, pC
+}
+
+func panicf(format string, a ...interface{}) {
+	panic(fmt.Sprintf(format, a...))
 }
 
 // Hypothetical unixtransport.Install API, see:

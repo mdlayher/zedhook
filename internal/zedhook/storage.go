@@ -114,6 +114,21 @@ func (s *Storage) ListEvents(ctx context.Context, o ListEventsOptions) ([]Event,
 	return queryList(ctx, s, (*Event).scan, query, args...)
 }
 
+// LatestEvents lists the latest event of each unique class for each zpool from
+// the database.
+func (s *Storage) LatestEvents(ctx context.Context) ([]Event, error) {
+	const query = `--
+SELECT
+	id, event_id, MAX(timestamp), class, zpool
+FROM events
+GROUP BY
+	class, zpool
+ORDER BY
+	zpool, timestamp DESC, event_id DESC;`
+
+	return queryList(ctx, s, (*Event).scan, query)
+}
+
 // GetEvent gets an Event and its associated data by ID from the database.
 func (s *Storage) GetEvent(ctx context.Context, id int) (Event, error) {
 	const (

@@ -52,15 +52,14 @@ func main() {
 		// TODO(mdlayher): collectors.NewDBStatsCollector.
 	)
 
-	var (
-		ll  = log.New(os.Stderr, "", log.LstdFlags)
-		srv = zedhook.NewServer(
-			zedhook.NewHandler(s, ll, reg),
-			ll,
-		)
-	)
+	ll := log.New(os.Stderr, "", log.LstdFlags)
 
-	if err := srv.Serve(ctx); err != nil {
+	h, err := zedhook.NewHandler(ctx, s, ll, reg)
+	if err != nil {
+		log.Fatalf("failed to create handler: %v", err)
+	}
+
+	if err := zedhook.NewServer(h, ll).Serve(ctx); err != nil {
 		ll.Fatalf("failed to serve zedhookd: %v", err)
 	}
 }

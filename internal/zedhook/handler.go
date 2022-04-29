@@ -48,9 +48,9 @@ type Handler struct {
 	mm  metrics
 }
 
-// NewHandler constructs an http.Handler for use with the Server. If any of its
-// dependencies are nil, defaults will be used.
-func NewHandler(s *Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
+// NewHandler constructs a Handler and prepares it for use with the Server. If
+// any of its dependencies are nil, defaults will be used.
+func NewHandler(ctx context.Context, s *Storage, ll *log.Logger, reg *prometheus.Registry) (*Handler, error) {
 	if s == nil {
 		s = MemoryStorage()
 	}
@@ -59,6 +59,12 @@ func NewHandler(s *Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
 	}
 	if reg == nil {
 		reg = prometheus.NewPedanticRegistry()
+	}
+
+	// TODO(mdlayher): plumb into a latest events index.
+	_, err := s.LatestEvents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch latest events: %v", err)
 	}
 
 	h := &Handler{
@@ -77,7 +83,7 @@ func NewHandler(s *Storage, ll *log.Logger, reg *prometheus.Registry) *Handler {
 	}))
 
 	h.mux = r
-	return h
+	return h, nil
 }
 
 // ServeHTTP implements http.Handler.
