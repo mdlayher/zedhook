@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/mdlayher/metricslite"
@@ -42,10 +43,11 @@ type Handler struct {
 	// with the contents of the Payload.
 	OnPayload func(p Payload)
 
-	s   *Storage
-	mux http.Handler
-	ll  *log.Logger
-	mm  metrics
+	index *eventIndex
+	s     *Storage
+	mux   http.Handler
+	ll    *log.Logger
+	mm    metrics
 }
 
 // NewHandler constructs a Handler and prepares it for use with the Server. If
@@ -61,16 +63,18 @@ func NewHandler(ctx context.Context, s *Storage, ll *log.Logger, reg *prometheus
 		reg = prometheus.NewPedanticRegistry()
 	}
 
-	// TODO(mdlayher): plumb into a latest events index.
-	_, err := s.LatestEvents(ctx)
+	// Index the known latest events for each zpool.
+	latest, err := s.LatestEvents(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest events: %v", err)
 	}
+	index := newEventIndex(latest)
 
 	h := &Handler{
-		s:  s,
-		ll: ll,
-		mm: newMetrics(metricslite.NewPrometheus(reg)),
+		index: index,
+		s:     s,
+		ll:    ll,
+		mm:    newMetrics(metricslite.NewPrometheus(reg), index),
 	}
 
 	r := mux.NewRouter()
@@ -126,6 +130,7 @@ func (h *Handler) push(w http.ResponseWriter, r *http.Request) {
 		h.logf(r, "failed to save client event: %v", err)
 		return
 	}
+	h.index.Insert(event)
 
 	if h.OnPayload != nil {
 		// Fire payload hook.
@@ -390,8 +395,35 @@ type metrics struct {
 	PushTotal, PushErrorsTotal metricslite.Counter
 }
 
+// epoch is the zero UNIX time.
+var epoch = time.Unix(0, 0)
+
 // newMetrics produces metrics based on the input metricslite.Interface.
-func newMetrics(mm metricslite.Interface) metrics {
+func newMetrics(mm metricslite.Interface, index *eventIndex) metrics {
+	mm.ConstGauge(
+		"zedhook_event_latest_timestamp_seconds",
+		"The UNIX timestamp with nanosecond precision of the most recent event for a given zpool and event class.",
+		"zpool", "class",
+	)
+
+	mm.OnConstScrape(func(metrics map[string]func(float64, ...string)) error {
+		for m, c := range metrics {
+			switch m {
+			case "zedhook_event_latest_timestamp_seconds":
+				// Note the latest event by class for each zpool.
+				index.Walk(func(e Event) {
+					// Convert nanosecond-precision time.Time into float64
+					// seconds for Prometheus.
+					c(e.Timestamp.Sub(epoch).Seconds(), e.Zpool, e.Class)
+				})
+			default:
+				panicf("zedhook: unhandled metric name %q", m)
+			}
+		}
+
+		return nil
+	})
+
 	return metrics{
 		PushTotal: mm.Counter(
 			"zedhook_push_total",

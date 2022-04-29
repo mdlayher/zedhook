@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -153,3 +154,53 @@ type Variable struct {
 
 // scan uses the scanner to populate a Variable.
 func (v *Variable) scan(s scanner) error { return s.Scan(&v.Key, &v.Value) }
+
+// An eventIndex is an index of the latest events by class, per zpool.
+type eventIndex struct {
+	mu sync.RWMutex
+	// zpool -> class -> Event
+	m map[string]map[string]Event
+}
+
+// newEventIndex creates an eventIndex with an initial set of Events.
+func newEventIndex(events []Event) *eventIndex {
+	ei := &eventIndex{m: make(map[string]map[string]Event)}
+	for _, e := range events {
+		ei.insertLocked(e)
+	}
+
+	return ei
+}
+
+// Insert inserts an Event into the index if it is for a new zpool/class or if
+// it's the newest Event of a given type.
+func (ei *eventIndex) Insert(e Event) {
+	ei.mu.Lock()
+	defer ei.mu.Unlock()
+	ei.insertLocked(e)
+}
+
+// insertLocked is the internal logic for Insert. It assumes ei.mu is held.
+func (ei *eventIndex) insertLocked(e Event) {
+	if _, ok := ei.m[e.Zpool]; !ok {
+		// New zpool.
+		ei.m[e.Zpool] = make(map[string]Event)
+	}
+
+	// Is this event type new, or is the timestamp after the old timestamp?
+	if old, ok := ei.m[e.Zpool][e.Class]; !ok || e.Timestamp.After(old.Timestamp) {
+		ei.m[e.Zpool][e.Class] = e
+	}
+}
+
+// Walk walks over the Events in the index in an unspecified order.
+func (ei *eventIndex) Walk(fn func(e Event)) {
+	ei.mu.RLock()
+	defer ei.mu.RUnlock()
+
+	for _, v := range ei.m {
+		for _, vv := range v {
+			fn(vv)
+		}
+	}
+}
